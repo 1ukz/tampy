@@ -1,0 +1,27 @@
+VIRUTAL ENV:
+python -m venv venv //create virtual env
+venv\Scripts\activate
+
+
+PACKAGES TO INSTALL: 
+pip install wappalyzer
+
+GECKODRIVER FOR SELENIUM: 
+Step 1: Download GeckoDriver
+Visit the official GeckoDriver releases page on GitHub:
+https://github.com/mozilla/geckodriver/releases
+Download the version compatible with your system:
+For Windows: geckodriver-vX.XX.X-win64.zip
+For macOS: geckodriver-vX.XX.X-macos.tar.gz
+For Linux: geckodriver-vX.XX.X-linux64.tar.gz
+Extract the downloaded file to a folder of your choice.
+S
+tep 2: Add GeckoDriver to the System Path
+To ensure Selenium can locate the GeckoDriver executable:
+Windows:
+Move the geckodriver.exe to a directory (e.g., C:\WebDrivers\).
+Add this directory to the system's PATH:
+Open Environment Variables.
+Under System Variables, find and select the Path variable, then click Edit.
+Click New and enter the directory path where geckodriver.exe is stored.
+Click OK to save.
