@@ -1,11 +1,20 @@
-import os
-import time
-import json
 import urllib.parse
+from wappalyzer import analyze
+from bcolors import bcolors
+
+def scan_url(url_input, scan_type): 
+    try:
+        print(f"{bcolors.BOLD}{bcolors.HEADER}\nRunning PHASE 1: WEB TECHNOLOGIES ENUMERATION...{bcolors.ENDC}")
+        print(f"{bcolors.HEADER}Please be patient until the scan is completed.{bcolors.ENDC}")
+        results = analyze(url_input, scan_type=scan_type)
+        return results  # Devolver el resultado obtenido
+    except Exception as e:
+        print(f"{bcolors.FAIL}An error occurred during analysis:{bcolors.ENDC}", e)
+        return None
 
 def check_ecommerce_platforms(results):
     """
-    Checks the scan results for any e-commerce technology and prints a message.
+    Checks the scan results for any e-commerce technology and prints a message.ENDCCC
     Returns a dictionary of detected e-commerce technologies.
     """
     commerce_platforms = [
@@ -22,15 +31,18 @@ def check_ecommerce_platforms(results):
                 if platform.lower() in tech.lower():
                     commerce_platforms_found[tech] = details.get("categories", [])
     
+    ecommerce_found = False
+
     if commerce_platforms_found:
-        print("\nThe following E-Commerce technologies were detected:")
+        print(f"{bcolors.FAIL}{bcolors.BOLD}\nThe following E-Commerce technologies were detected:{bcolors.ENDC}")
         for tech, cats in commerce_platforms_found.items():
             # Print in red (ANSI escape code)
-            print("\033[91m" + f"{tech} - {', '.join(cats)}" + "\033[0m")
+            print(f"{bcolors.FAIL}{tech} - {', '.join(cats)}{bcolors.ENDC}")
+        ecommerce_found = True
     else:
-        print("\nNo E-Commerce technologies were detected.")
+        print(f"{bcolors.BOLD}{bcolors.OKGREEN}\nNo E-Commerce technologies were detected!! :){bcolors.ENDC}")
     
-    return commerce_platforms_found
+    return commerce_platforms_found, ecommerce_found
 
 def get_pretty_output(results, commerce_platforms_found, items_per_row=3):
     """
@@ -76,7 +88,7 @@ def save_results_to_file(url, content):
     try:
         with open(filename, "w", encoding="utf-8") as f:
             f.write(content)
-        print(f"\nResults saved to file: {filename}")
+        print(f"{bcolors.OKBLUE}\nResults saved to file: {filename}{bcolors.ENDC}")
     except Exception as e:
-        print("Error saving results to file:", e)
+        print(f"{bcolors.FAIL} Error saving results to file:{bcolors.ENDC}", e)
     return filename
