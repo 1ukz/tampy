@@ -1,6 +1,23 @@
 import urllib.parse
 from wappalyzer import analyze
 from bcolors import bcolors
+import requests
+
+
+def verify_website_exists(url):
+    """
+    Verifica que la página existe intentando descargarla.
+    Retorna True si se accede correctamente (código 200), False en caso contrario.
+    """
+    try:
+        # Se utiliza GET ya que algunos servidores no responden bien a HEAD.
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"{bcolors.BOLD}{bcolors.FAIL}Connection error: The website does not exist or could not be accessed. Please try another URL.{bcolors.ENDC}")
+        print(f"{bcolors.FAIL}({e}{bcolors.ENDC}")   
+        return False
 
 def scan_url(url_input, scan_type): 
     try:

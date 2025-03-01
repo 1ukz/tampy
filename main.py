@@ -1,9 +1,8 @@
 import os
 import time
-import requests
 import re
-from webtech_rec import scan_url, check_ecommerce_platforms, get_pretty_output, save_results_to_file
-from html_analyzer import check_cart_section
+from webtech_rec import scan_url, check_ecommerce_platforms, get_pretty_output, save_results_to_file, verify_website_exists
+from html_analyzer import search_html_for_keywords
 from bcolors import bcolors
 
 def animate_title():
@@ -43,20 +42,6 @@ def animate_title():
     print("------------------------------------------------------------\n\n")
     time.sleep(0.5)
 
-def verify_website_exists(url):
-    """
-    Verifica que la página existe intentando descargarla.
-    Retorna True si se accede correctamente (código 200), False en caso contrario.
-    """
-    try:
-        # Se utiliza GET ya que algunos servidores no responden bien a HEAD.
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        return True
-    except Exception as e:
-        print(f"{bcolors.FAIL}Connection error: Website does not exist or access was not granted!\n({e}){bcolors.ENDC}")
-        return False
-
 def url_menu():
     url_input = input(f"{bcolors.BOLD}Enter the URL to analyze: {bcolors.ENDC}").strip().lower()
     
@@ -69,11 +54,11 @@ def url_menu():
         elif pattern.match(url_input):
             modified_url = "https://www." + url_input
         else:
-            print(f"{bcolors.BOLD}{bcolors.FAIL}URL does not have an expected format. Please check it is correctly introduced.{bcolors.ENDC}")
+            print(f"{bcolors.BOLD}{bcolors.FAIL}URL does not have an expected format. Please check it is correctly introduced, and try again.{bcolors.ENDC}")
             url_input = None
             return url_input, None
         
-        print(f"URL modified to: {modified_url}")
+        print(f"{bcolors.WARNING}URL modified to: {modified_url}{bcolors.ENDC}")
         url_input = modified_url
 
     # Preguntar por el tipo de escaneo
@@ -93,6 +78,11 @@ def url_menu():
 def yes_no_menu(question):
     choice = input(question).strip().lower()
     return choice in ['y', 'yes']
+
+def phase_2(url_input):
+    # Define the list of keywords to search for (can be modified as needed)
+    keywords = ['cart', 'shopping cart', 'bag']
+    search_html_for_keywords(url_input, keywords)
 
 def phase_1(url_input, scan_type):
     # Ejecuta el escaneo de tecnologías web
@@ -134,19 +124,16 @@ def main():
             
                 if ecommerce_found != True:
                     print(f"{bcolors.BOLD}{bcolors.HEADER}\nRunning PHASE 2: EXAMINATION OF PURCHASE LOGIC...\n{bcolors.ENDC}")
-                    time.sleep(0.2)
-                    check_cart_section(url_input)
+                    time.sleep(1)
+                    phase_2(url_input)
                 else:
                     print(f"{bcolors.BOLD}{bcolors.FAIL}The assessment cannot continue as an E-Commerce platform was found :({bcolors.ENDC}")
-            else:
-                print(f"{bcolors.FAIL}The website does not exist or could not be accessed. Please try another URL.{bcolors.ENDC}")
-        else:
-            print(f"{bcolors.FAIL}Invalid URL entered. Please try again.{bcolors.ENDC}")
 
         if not yes_no_menu(f"{bcolors.BOLD}\nDo you want to try a new website? (y/n): {bcolors.ENDC}"):
             break
 
-    print(f"{bcolors.WARNING}Exiting...{bcolors.ENDC}")
+    print(f"{bcolors.BOLD}{bcolors.OKCYAN}\nGoodbye! Thank you for using TAMPY :){bcolors.ENDC}")
+    print(f"{bcolors.WARNING}Exiting now...{bcolors.ENDC}")
 
 if __name__ == '__main__':
     main()
