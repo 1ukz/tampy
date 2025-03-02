@@ -4,7 +4,8 @@ venv\Scripts\activate
 
 
 PACKAGES TO INSTALL: 
-pip install wappalyzer
+python -m pip install wappalyzer webdriver_manager (aunque no se si este ultimo hace falta…)
+
 
 GECKODRIVER FOR SELENIUM: 
 Step 1: Download GeckoDriver
