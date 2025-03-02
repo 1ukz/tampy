@@ -1,8 +1,30 @@
 import urllib.parse
+import os
 from wappalyzer import analyze
 from bcolors import bcolors
 import requests
 
+def parse_existing_file_for_ecommerce(filename):
+    """
+    Reads the lines of the existing file, searching for any that contain "E-COMMERCE:".
+    If found, we replicate the same message that 'check_ecommerce_platforms' would display.
+    Returns True if e-commerce was detected, False otherwise.
+    """
+    if not os.path.exists(filename):
+        return False
+    ecom_detected = False
+    with open(filename, "r", encoding="utf-8") as f:
+        for line in f:
+            if "e-commerce:" in line.lower():
+                ecom_detected = True
+                # Once we find at least one e-commerce line, we can decide
+                # but we keep scanning if we want to gather all lines, if needed.
+    if ecom_detected:
+        print(f"{bcolors.FAIL}{bcolors.BOLD}\nThe following E-Commerce technologies were detected (based on previous analysis):{bcolors.ENDC}")
+        # For simplicity, just mention that e-commerce was found.
+    else:
+        print(f"{bcolors.BOLD}{bcolors.OKGREEN}\nNo E-Commerce technologies were detected (based on previous analysis)!! :){bcolors.ENDC}")
+    return ecom_detected
 
 def verify_website_exists(url):
     """
@@ -19,11 +41,11 @@ def verify_website_exists(url):
         print(f"{bcolors.FAIL}({e}{bcolors.ENDC}")   
         return False
 
-def scan_url(url_input, scan_type): 
+def scan_url(url_input): 
     try:
         print(f"{bcolors.BOLD}{bcolors.HEADER}\nRunning PHASE 1: WEB TECHNOLOGIES ENUMERATION...{bcolors.ENDC}")
         print(f"{bcolors.HEADER}Please be patient until the scan is completed.{bcolors.ENDC}")
-        results = analyze(url_input, scan_type=scan_type)
+        results = analyze(url_input, scan_type='full')
         return results  # Devolver el resultado obtenido
     except Exception as e:
         print(f"{bcolors.FAIL}An error occurred during analysis:{bcolors.ENDC}", e)
