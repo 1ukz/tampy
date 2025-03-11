@@ -1,0 +1,11 @@
+- los scanner buscan vulnerabilidades genéricas y no vulnerabilidades especificas (como contribución de trabajo hecho)
+
+
+- en trabajo futuro: aunque se investigo la forma de integrarlo como una extensión, se propone como linea futura de manera mas detenida y estudiada el implementarlo en zaproxy como un addon. 
+
+- periodo de defensa en julio (el 3 de junio finaliza el periodo de solicitud de defensa). la primera quincena de julio habría que entregar la defensa. 
+
+
+- se puede presentar como una herramienta para ayudar el desarrrollo o mas enfocado a auditoria, pensar en como presentarlo. 
+
+- se tiene que formalizar la metodología de lo que se va a hacer. Se tiene que seguir ciertos pasos formales y metódicos. Por ejemplo: Todos los parámetros se deben analizan, y los que aparezcan susceptibles a inyecciones, se deben de analizar mas a fondo. 
