@@ -1,5 +1,4 @@
-openai==1.86.0
-pandas==2.3.0
+openai==1.87.0
 python-dotenv==1.1.0
 Requests==2.32.4
 selenium==4.33.0
