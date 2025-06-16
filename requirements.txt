@@ -1,0 +1,8 @@
+openai==1.86.0
+pandas==2.3.0
+python-dotenv==1.1.0
+Requests==2.32.4
+selenium==4.33.0
+selenium_wire==5.1.0
+wappalyzer==1.0.14
+webdriver_manager==4.0.2

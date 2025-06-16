@@ -1,0 +1,69 @@
+Category: Security
+------------------
+HSTS
+
+Category: Miscellaneous
+-----------------------
+HTTP/2 | HTTP/3 | ServiceNow
+Open Graph | RSS
+
+Category: Web servers
+---------------------
+Nginx
+
+Category: Reverse proxies
+-------------------------
+Nginx
+
+Category: Programming languages
+-------------------------------
+PHP
+
+Category: Advertising
+---------------------
+Amazon Advertising | Marfeel | Prebid
+
+Category: Cookie compliance
+---------------------------
+Didomi | Funding Choices
+
+Category: Authentication
+------------------------
+Google Sign-in
+
+Category: Analytics
+-------------------
+Hotjar | Marfeel | Adobe Analytics
+Facebook Pixel
+
+Category: Geolocation
+---------------------
+ipify
+
+Category: Customer data platform
+--------------------------------
+Adobe Experience Platform Identity Service
+
+Category: Tag managers
+----------------------
+Adobe Experience Platform Launch | Google Tag Manager
+
+Category: A/B Testing
+---------------------
+Adobe Target
+
+Category: Personalisation
+-------------------------
+Adobe Target
+
+Category: JavaScript libraries
+------------------------------
+core-js | jQuery | Preact
+
+Category: JavaScript frameworks
+-------------------------------
+React
+
+Category: Ecommerce
+-------------------
+Cart Functionality

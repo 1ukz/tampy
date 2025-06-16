@@ -1,51 +1,101 @@
 import os
-from selenium import webdriver
+import json
+import urllib.parse
+from seleniumwire import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from webdriver_manager.firefox import GeckoDriverManager
 from bcolors import bcolors
 
-def record_user_session(url):
+def record_user_session(url, packets_dir):
     """
-    Opens Firefox (via geckodriver), installs the Katalon Automation Record extension
-    dynamically, and then navigates to the given URL so the user can interact.
-    
-    This avoids requiring a custom local profile, making it portable for anyone
-    who clones the repository.
+    Opens Firefox (via Selenium Wire) to capture all HTTP(S) traffic,
+    allows the user to interact, then saves captured requests to JSON.
     """
-    # Path to the Katalon Automation Record extension XPI file
-    extension_path = os.path.join(".", "extensions", "katalon_automation_record-5.5.3.xpi")
-    
-    # Check if the extension file exists
-    if not os.path.exists(extension_path):
-        print(f"{bcolors.FAIL}Katalon extension not found at {extension_path}.{bcolors.ENDC}")
-        print(f"{bcolors.FAIL}Please place the XPI file in the 'extensions' folder or update the path.{bcolors.ENDC}")
-        return
+    # Compute prefix for filenames
+    parsed = urllib.parse.urlparse(url)
+    domain = parsed.netloc.lower()
+    if domain.startswith("www."):
+        domain = domain[4:]
+    prefix = domain.split('.')[0]
 
+
+    # Configure Selenium Wire (no extra options needed)
     options = Options()
-    options.headless = False  # We want to see the browser UI
-    
-    print(f"{bcolors.OKBLUE}Launching Firefox...{bcolors.ENDC}")
+    options.headless = False
+
+    print(f"{bcolors.OKBLUE}Opening Firefox with Selenium Wire to capture traffic...{bcolors.ENDC}")
     driver = webdriver.Firefox(
         service=FirefoxService(GeckoDriverManager().install()),
         options=options
     )
-
-    try:
-        # Install the Katalon extension at runtime
-        driver.install_addon(extension_path, temporary=True)
-        print(f"{bcolors.OKBLUE}Katalon extension installed {bcolors.ENDC}")
-    except Exception as e:
-        print(f"{bcolors.FAIL}Failed to install Katalon extension dynamically: {e}{bcolors.ENDC}")
-        driver.quit()
-        return
-
-    # Now navigate to the URL
     driver.get(url)
-    print(f"{bcolors.OKBLUE}Katalon Automation Record should be available.\n"
-          f"Interact with the website normally. When finished, close the browser window or press Enter here to end session recording.{bcolors.ENDC}")
 
-    input("Press Enter after you have finished interacting with the website...")
+    input(f"{bcolors.BOLD}Press Enter when you have finished the interaction...{bcolors.ENDC}")
+
+    # Collect and save captured requests
+    print(f"{bcolors.OKBLUE}Saving captured requests to JSON...{bcolors.ENDC}")
+    # tras calcular `prefix` y crear packets_dir…
+    # Dominio objetivo (sin subdominio ni www)
+    target = domain  
+
+    # Lista de extensiones a ignorar
+    ignored_exts = (
+        ".png", ".jpg", ".jpeg", ".gif", ".css", ".js",
+        ".ico", ".svg", ".woff", ".woff2", ".ttf", ".map"
+    )
+
+    ignored_analytics = (
+        "google", "gtag", "analytics.js", "ga.js",
+        "collect", "analytics", "track", "beacon", "facebook",
+        "fbq", "mixpanel", "hotjar", "matomo", "piwik"
+    )
+
+    har_data = []
+    
+    for request in driver.requests:
+        url = request.url.lower()
+
+        # 1. filtrar sólo tu dominio
+        if target not in url:
+            continue
+
+        # 2. ignorar estáticos por extensión
+        if any(url.endswith(ext) for ext in ignored_exts):
+            continue
+        if any(term in url for term in ignored_analytics):
+            continue
+
+        # 3. ignorar métodos que no interesen
+        if request.method not in ("GET", "POST", "PUT"):
+            continue
+
+        # 4. filtrar por content-type de la respuesta
+        content_type = ""
+        if request.response and "Content-Type" in request.response.headers:
+            content_type = request.response.headers["Content-Type"]
+        if content_type.startswith(("image/", "font/", "video/")):
+            continue
+
+        # Si pasa todos los filtros, lo metemos en el JSON
+        entry = {
+            "method": request.method,
+            "url": request.url,
+            "headers": dict(request.headers),
+            "response": {
+                "status_code": request.response.status_code if request.response else None,
+                "headers": dict(request.response.headers) if request.response else None,
+            },
+            "body": request.body.decode('utf-8', errors='ignore') if request.body else None,
+        }
+        har_data.append(entry)
+
+    har_filename = os.path.join(packets_dir, f"{prefix}_packets.json")
+    with open(har_filename, "w", encoding="utf-8") as f:
+        json.dump(har_data, f, indent=2)
+    print(f"{bcolors.OKGREEN}Captured traffic saved to: {har_filename}{bcolors.ENDC}")
 
     driver.quit()
-    print(f"{bcolors.OKBLUE}User session recording finished. You can now export the recorded actions from the Katalon extension.{bcolors.ENDC}")
+    print(f"{bcolors.OKCYAN}Session recording complete.{bcolors.ENDC}")
+    return har_filename
+
