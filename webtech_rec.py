@@ -1,7 +1,7 @@
 import urllib.parse
 import os
 from wappalyzer import analyze
-from bcolors import bcolors
+from resources.bcolors import bcolors
 import requests
 
 def parse_existing_file_for_ecommerce(filename):
@@ -28,15 +28,14 @@ def verify_website_exists(url):
         response.raise_for_status()
         return True
     except requests.exceptions.HTTPError as e:
-        print(f"{bcolors.BOLD}{bcolors.FAIL}Connection error: {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}")
+        #print(f"{bcolors.BOLD}{bcolors.FAIL}Connection error: {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}")
         return False
     except Exception as e:
-        print(f"{bcolors.BOLD}{bcolors.FAIL}Connection error: {e}{bcolors.ENDC}")
+        #print(f"{bcolors.BOLD}{bcolors.FAIL}Connection error: {e}{bcolors.ENDC}")
         return False
 
 def scan_url(url_input):
     try:
-        print(f"{bcolors.BOLD}{bcolors.HEADER}\nRunning PHASE 1: WEB TECHNOLOGIES ENUMERATION...{bcolors.ENDC}")
         print(f"{bcolors.HEADER}Scanning... please wait.{bcolors.ENDC}")
         results = analyze(url_input, scan_type='full')
         return results

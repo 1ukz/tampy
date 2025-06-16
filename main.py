@@ -10,6 +10,7 @@ import re
 import urllib.parse
 import time
 import json
+import argparse
 from dotenv import load_dotenv
 from webtech_rec import (
     scan_url,
@@ -19,9 +20,9 @@ from webtech_rec import (
     verify_website_exists,
     parse_existing_file_for_ecommerce
 )
-from bcolors import bcolors
+from resources.bcolors import bcolors
 from session_recorder import record_user_session
-from deepseek_analyzer import analyze_packets_with_deepseek
+from ai_analyzer import analyze_packets_with_ai
 
 def animate_title():
     ascii_art = [
@@ -81,6 +82,7 @@ def phase_1(url_input, webtechs_dir):
     - Checks if a previous analysis file exists in 'webtechs' folder.
     - Otherwise, run a new analysis, store the .log, and parse for e-commerce.
     """
+    print(f"{bcolors.BOLD}{bcolors.HEADER}[PHASE 1]: WEB TECHNOLOGIES ENUMERATION...{bcolors.ENDC}")
     parsed_url = urllib.parse.urlparse(url_input)
     domain = parsed_url.netloc.lower()
     if domain.startswith("www."):
@@ -90,35 +92,52 @@ def phase_1(url_input, webtechs_dir):
     filename = os.path.join(webtechs_dir, f"{prefix}_webtechs_found.log")
     
     if os.path.exists(filename):
-        print(f"{bcolors.OKBLUE}Using existing log: {filename}{bcolors.ENDC}")
-        time.sleep(1)
-        ecommerce_found = parse_existing_file_for_ecommerce(filename)
-        return ecommerce_found
-    else:
-        results = scan_url(url_input)
-        if not results:
-            return True  # skip Phase 2
-        platforms_found, ecommerce_found = check_ecommerce_platforms(results)
-        pretty = get_pretty_output(results, platforms_found, items_per_row=3)
-        save_results_to_file(url_input, pretty, webtechs_dir)
-        print(f"{bcolors.OKGREEN}Webtechs log saved to: {filename}{bcolors.ENDC}")
-        return ecommerce_found
+        print(f"{bcolors.OKBLUE}A log file has been found for this URL. {bcolors.ENDC}")      
+        if yes_no_menu(f"{bcolors.BOLD}Do you want to use the existing log file and skip enumeration? (y/n): {bcolors.ENDC}"):
+            print(f"{bcolors.OKBLUE}Using existing log: {filename}{bcolors.ENDC}")
+            time.sleep(1)
+            ecommerce_found = parse_existing_file_for_ecommerce(filename)
+            return ecommerce_found
+        
+    results = scan_url(url_input)
+    if not results:
+        return True
+    
+    platforms_found, ecommerce_found = check_ecommerce_platforms(results)
+    pretty = get_pretty_output(results, platforms_found, items_per_row=3)
+    save_results_to_file(url_input, pretty, webtechs_dir)
+    print(f"{bcolors.OKGREEN}Webtechs log saved to: {filename}{bcolors.ENDC}")
+    return ecommerce_found
 
 def phase_2(url_input, packets_dir):
-    print(f"{bcolors.BOLD}{bcolors.HEADER}\nRunning PHASE 2: USER SESSION RECORDING...{bcolors.ENDC}")
-    time.sleep(1)
-    # phase 2: record user session
-    har_filename = record_user_session(url_input, packets_dir)
-    if not har_filename:
+    print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 2]: USER SESSION RECORDING...{bcolors.ENDC}")
+        
+    # Compute prefix for filenames
+    parsed = urllib.parse.urlparse(url_input)
+    domain = parsed.netloc.lower()
+    if domain.startswith("www."):
+        domain = domain[4:]
+    prefix = domain.split('.')[0]
+
+    har_filename = os.path.join(packets_dir, f"{prefix}_packets.json")
+    
+    if os.path.exists(har_filename):
+        print(f"{bcolors.OKBLUE}A HAR file has been found for this URL. {bcolors.ENDC}")      
+        if yes_no_menu(f"{bcolors.BOLD}Do you want to use the existing HAR file and skip recording? (y/n): {bcolors.ENDC}"):
+            print(f"{bcolors.OKBLUE}Using existing HAR file: {har_filename}{bcolors.ENDC}")
+            return har_filename
+        
+    har_file = record_user_session(url_input, domain, har_filename)
+    if not har_file:
         print(f"{bcolors.FAIL}ERROR: No packets were captured or could not be analyzed.{bcolors.ENDC}")
         return None
-    
-    return har_filename
+    return har_file
 
-def phase_3(har_filename):
+def phase_3(har_filename, mode, streaming):
+    print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 3]: ANALYZING HTTP PACKETS...{bcolors.ENDC}")
 
     # 2) Llama al analizador (bloqueante)
-    raw_result, result = analyze_packets_with_deepseek(har_filename, model="deepseek-reasoner")
+    raw_result, result = analyze_packets_with_ai(har_filename, mode, streaming)
     
     if not result:
         print(f"{bcolors.FAIL}ERROR: No AI results to display. Raw response below for debugging:{bcolors.ENDC}\n")
@@ -140,20 +159,37 @@ def phase_3(har_filename):
 
 def startup():
 
+    print(f"{bcolors.BOLD}{bcolors.OKBLUE}Welcome to TAMPY v1.0!{bcolors.ENDC}")
+
     load_dotenv()
 
     logs_dir = ".logs"
     os.makedirs(logs_dir, exist_ok=True)
-
     webtechs_dir = r".logs\webtechs"
     os.makedirs(webtechs_dir, exist_ok=True)
-
     packets_dir = r".logs\packets"
     os.makedirs(packets_dir, exist_ok=True)
 
     return logs_dir, webtechs_dir, packets_dir
 
+def load_args():
+    parser = argparse.ArgumentParser(description="TAMPY 1.0 - An E-Commerce Web Security Assessment Tool")
+    lr_group = parser.add_mutually_exclusive_group(required=True)
+    lr_group.add_argument('-L', '--local',  action='store_true',
+                   help='Use local LLM server')
+    lr_group.add_argument('-R', '--remote', action='store_true',
+                   help='Use a remote LLM API')
+    parser.add_argument('-S', '--stream',   action='store_true',  
+                   help='Enable streaming mode for LLM output (default: false)')
+    args = parser.parse_args()
+    
+    mode = 'local' if args.local else 'remote'  
+    streaming = True if args.stream else False
+
+    return mode, streaming
+
 def main():
+    mode, streaming = load_args()
     animate_title()
     logs_dir, webtechs_dir, packets_dir = startup()
     
@@ -165,7 +201,7 @@ def main():
                 if not ecommerce_found:
                     har_filename = phase_2(url_input, packets_dir)
                     if har_filename:
-                        phase_3(har_filename)
+                        phase_3(har_filename, mode, streaming)
                     else:
                         print(f"{bcolors.FAIL}ERROR: No packets captured in Phase 2.{bcolors.ENDC}")
                 else:

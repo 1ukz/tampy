@@ -5,20 +5,13 @@ from seleniumwire import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from webdriver_manager.firefox import GeckoDriverManager
-from bcolors import bcolors
+from resources.bcolors import bcolors
 
-def record_user_session(url, packets_dir):
+def record_user_session(url, domain, har_filename):
     """
     Opens Firefox (via Selenium Wire) to capture all HTTP(S) traffic,
     allows the user to interact, then saves captured requests to JSON.
     """
-    # Compute prefix for filenames
-    parsed = urllib.parse.urlparse(url)
-    domain = parsed.netloc.lower()
-    if domain.startswith("www."):
-        domain = domain[4:]
-    prefix = domain.split('.')[0]
-
 
     # Configure Selenium Wire (no extra options needed)
     options = Options()
@@ -57,7 +50,7 @@ def record_user_session(url, packets_dir):
         url = request.url.lower()
 
         # 1. filtrar sólo tu dominio
-        if target not in url:
+        if domain not in url:
             continue
 
         # 2. ignorar estáticos por extensión
@@ -90,7 +83,6 @@ def record_user_session(url, packets_dir):
         }
         har_data.append(entry)
 
-    har_filename = os.path.join(packets_dir, f"{prefix}_packets.json")
     with open(har_filename, "w", encoding="utf-8") as f:
         json.dump(har_data, f, indent=2)
     print(f"{bcolors.OKGREEN}Captured traffic saved to: {har_filename}{bcolors.ENDC}")
