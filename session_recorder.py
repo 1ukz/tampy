@@ -1,11 +1,25 @@
-import os
 import json
-import urllib.parse
 from seleniumwire import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from webdriver_manager.firefox import GeckoDriverManager
 from resources.bcolors import bcolors
+import gzip
+import zlib
+
+def decode_response_body(response):
+
+    if not response.body:
+        return None
+
+    content_encoding = response.headers.get('Content-Encoding', '').lower()
+    
+    if content_encoding == 'gzip':
+        return gzip.decompress(response.body).decode('utf-8', errors='ignore')
+    elif content_encoding == 'deflate':
+        return zlib.decompress(response.body).decode('utf-8', errors='ignore')
+    
+    return response.body.decode('utf-8', errors='ignore')
 
 def record_user_session(url, domain, har_filename):
     """
@@ -17,7 +31,8 @@ def record_user_session(url, domain, har_filename):
     options = Options()
     options.headless = False
 
-    print(f"{bcolors.OKBLUE}Opening Firefox with Selenium Wire to capture traffic...{bcolors.ENDC}")
+    print(f"{bcolors.OKBLUE}[INFO]: Opening Firefox with Selenium Wire to capture traffic...{bcolors.ENDC}")
+    print(f"{bcolors.OKBLUE}[INFO]: If the Firefox browser does not open automatically, please exit and rerun Tampy.{bcolors.ENDC}")
     driver = webdriver.Firefox(
         service=FirefoxService(GeckoDriverManager().install()),
         options=options
@@ -27,7 +42,7 @@ def record_user_session(url, domain, har_filename):
     input(f"{bcolors.BOLD}Press Enter when you have finished the interaction...{bcolors.ENDC}")
 
     # Collect and save captured requests
-    print(f"{bcolors.OKBLUE}Saving captured requests to JSON...{bcolors.ENDC}")
+    print(f"{bcolors.OKBLUE}[INFO]: Saving captured requests to JSON...{bcolors.ENDC}")
     # tras calcular `prefix` y crear packets_dir…
     # Dominio objetivo (sin subdominio ni www)
     target = domain  
@@ -75,19 +90,20 @@ def record_user_session(url, domain, har_filename):
             "method": request.method,
             "url": request.url,
             "headers": dict(request.headers),
+            "body": request.body.decode('utf-8', errors='ignore') if request.body else None,
             "response": {
                 "status_code": request.response.status_code if request.response else None,
                 "headers": dict(request.response.headers) if request.response else None,
+                # "body": decode_response_body(request.response) if request.response and request.response.body else None,
             },
-            "body": request.body.decode('utf-8', errors='ignore') if request.body else None,
+            
         }
         har_data.append(entry)
 
     with open(har_filename, "w", encoding="utf-8") as f:
         json.dump(har_data, f, indent=2)
-    print(f"{bcolors.OKGREEN}Captured traffic saved to: {har_filename}{bcolors.ENDC}")
+    print(f"{bcolors.OKGREEN}[SUCCESS]: Captured traffic saved to: {har_filename}{bcolors.ENDC}")
 
-    driver.quit()
-    print(f"{bcolors.OKCYAN}Session recording complete.{bcolors.ENDC}")
-    return har_filename
+    print(f"{bcolors.OKBLUE}[INFO]: Session recording complete. Keeping browser open for replay tests…{bcolors.ENDC}")
+    return har_filename, driver
 

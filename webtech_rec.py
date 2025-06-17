@@ -15,7 +15,7 @@ def parse_existing_file_for_ecommerce(filename):
     if ecom_detected:
         print(f"{bcolors.FAIL}{bcolors.BOLD}\nThe following E-Commerce technologies were detected (from log):{bcolors.ENDC}")
     else:
-        print(f"{bcolors.BOLD}{bcolors.OKGREEN}\nNo E-Commerce technologies were detected (from log)!! :){bcolors.ENDC}")
+        print(f"{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: No E-Commerce technologies were detected (from log)!! :){bcolors.ENDC}")
     return ecom_detected
 
 def verify_website_exists(url):
@@ -28,22 +28,21 @@ def verify_website_exists(url):
         response.raise_for_status()
         return True
     except requests.exceptions.HTTPError as e:
-        #print(f"{bcolors.BOLD}{bcolors.FAIL}Connection error: {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}")
+        #print(f"{bcolors.BOLD}{bcolors.FAIL}Connection [ERROR]: : {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}")
         return False
     except Exception as e:
-        #print(f"{bcolors.BOLD}{bcolors.FAIL}Connection error: {e}{bcolors.ENDC}")
+        #print(f"{bcolors.BOLD}{bcolors.FAIL}Connection [ERROR]: : {e}{bcolors.ENDC}")
         return False
 
-def scan_url(url_input):
+def scan_url(url_input, spinner):
     try:
-        print(f"{bcolors.HEADER}Scanning... please wait.{bcolors.ENDC}")
         results = analyze(url_input, scan_type='full')
         return results
     except Exception as e:
-        print(f"{bcolors.FAIL}An error occurred during analysis: {e}{bcolors.ENDC}")
+        print(f"{bcolors.FAIL}An [ERROR]: Error occurred during analysis: {e}{bcolors.ENDC}")
         return None
 
-def check_ecommerce_platforms(results):
+def check_ecommerce_platforms(results, spinner):
     commerce_platforms = [
         "Ecommerce", "Shopify", "Wix", "WooCommerce", "PrestaShop", "Joomla", 
         "Magento", "BigCommerce", "Squarespace", "OpenCart", "Zen Cart", 
@@ -56,12 +55,14 @@ def check_ecommerce_platforms(results):
                 if platform.lower() in tech.lower():
                     found[tech] = details.get("categories", [])
     if found:
+        spinner.stop()
         print(f"{bcolors.FAIL}{bcolors.BOLD}\nThe following E-Commerce technologies were detected:{bcolors.ENDC}")
         for tech, cats in found.items():
             print(f"{bcolors.FAIL}{tech} - {', '.join(cats)}{bcolors.ENDC}")
         return found, True
     else:
-        print(f"{bcolors.BOLD}{bcolors.OKGREEN}\nNo E-Commerce technologies were detected!! :){bcolors.ENDC}")
+        spinner.stop()
+        print(f"{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: No E-Commerce technologies were detected!! :){bcolors.ENDC}")
         return found, False
 
 def get_pretty_output(results, found, items_per_row=3):
@@ -97,5 +98,5 @@ def save_results_to_file(url, content, logs_dir):
         with open(filename, "w", encoding="utf-8") as f:
             f.write(content)
     except Exception as e:
-        print(f"{bcolors.FAIL} Error saving log:{bcolors.ENDC} {e}")
+        print(f"{bcolors.FAIL} [ERROR]: Error saving log:{bcolors.ENDC} {e}")
     return filename

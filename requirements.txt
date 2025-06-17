@@ -5,3 +5,6 @@ selenium==4.33.0
 selenium_wire==5.1.0
 wappalyzer==1.0.14
 webdriver_manager==4.0.2
+blinker==1.4
+setuptools==80.9.0
+halo==0.0.31
