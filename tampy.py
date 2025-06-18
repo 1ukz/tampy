@@ -211,14 +211,14 @@ def phase_4(driver, result):
                 print("Modified request:")
                 print(json.dumps(to_send, indent=2))
                 
-                if not yes_no_menu("Edit another field? (y/n): "):
+                if not yes_no_menu(f"{bcolors.BOLD}Edit another field? (y/n): {bcolors.ENDC}"):
                     break
         
         # mark it so we can pick it out of the wire log
         to_send['headers']['X-Replay-Test'] = 'true'
         replay_and_capture(driver, to_send)
     
-        if not yes_no_menu("Test another control? (y/n): "):
+        if not yes_no_menu(f"{bcolors.BOLD}Test another control? (y/n): {bcolors.ENDC}"):
             driver.quit()
             break
 
