@@ -3,3 +3,5 @@
 - AI also browses through website without the need of the manual input of user (using coordinates axis letting know selenium where to click, or using an interactive agent such as agentSeek) 
 - generar reporte automaticamente con lo hayado una vez se ha hecho las pruebas
 - depurar mas logs de peticiones para que tarde menos la ia y ganar eficiencia
+- break the dependency with the wappalyzer-next package (and needing mozilla)
+

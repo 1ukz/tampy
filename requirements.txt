@@ -8,3 +8,5 @@ webdriver_manager==4.0.2
 blinker==1.4
 setuptools==80.9.0
 halo==0.0.31
+playwright==1.52.0
+playwright-stealth==2.0.0
