@@ -1,8 +1,43 @@
+import re
 import urllib.parse
 import os
 from wappalyzer import analyze
 from resources.bcolors import bcolors
 import requests
+
+
+def url_menu(url_skip_prompt):
+    print(
+        f"{bcolors.BOLD}{bcolors.HEADER}[PHASE 1]: WEB TECHNOLOGIES ENUMERATION{bcolors.ENDC}"
+    )
+    url_input = ""
+
+    if url_skip_prompt is not None:
+        url_input = url_skip_prompt.strip()
+        print(
+            f"{bcolors.BOLD}{bcolors.OKGREEN} Using the provided URL: {url_input} {bcolors.ENDC}"
+        )
+    else:
+        url_input = input(
+            f"{bcolors.BOLD}Enter the URL to analyze: {bcolors.ENDC}"
+        ).strip()
+
+    if not (url_input.startswith("http://") or url_input.startswith("https://")):
+        pattern = re.compile(r"^([a-z0-9-]+\.)+[a-z]{2,}$", re.IGNORECASE)
+        if url_input.startswith("www."):
+            modified_url = "https://" + url_input
+        elif pattern.match(url_input):
+            modified_url = "https://www." + url_input
+        else:
+            print(
+                f"{bcolors.BOLD}{bcolors.FAIL}URL does not have an expected format. Please check it and try again.{bcolors.ENDC}"
+            )
+            return None
+        print(
+            f"{bcolors.WARNING}[WARNING]: URL modified to: {modified_url}{bcolors.ENDC}"
+        )
+        url_input = modified_url
+    return url_input
 
 
 def parse_existing_file_for_ecommerce(filename):

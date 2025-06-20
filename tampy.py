@@ -1,6 +1,7 @@
 import json
 import warnings
 from phases.har_parser import parse_har
+from resources.animate_title import animate_title
 
 warnings.filterwarnings(
     "ignore", category=UserWarning, message="pkg_resources is deprecated as an API.*"
@@ -9,7 +10,6 @@ warnings.filterwarnings(
 # noqa: E402
 import os  # noqa: E402
 import time  # noqa: E402
-import re  # noqa: E402
 import urllib.parse  # noqa: E402
 import argparse  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
@@ -19,75 +19,19 @@ from phases.webtech_rec import (  # noqa: E402
     check_ecommerce_platforms,
     get_pretty_output,
     save_results_to_file,
+    url_menu,
     verify_website_exists,
     parse_existing_file_for_ecommerce,
 )
 from phases.session_recorder_pw import record_user_session as record_user_session_pw  # noqa: E402
 from phases.ai_analyzer import analyze_packets_with_ai, print_ai_answer  # noqa: E402
-from old.control_testing import edit_packet  # noqa: E402
+from phases.control_testing import edit_packet  # noqa: E402
 from resources.bcolors import bcolors  # noqa: E402
 from resources.yes_no_menu import yes_no_menu  # noqa: E402
 
 
-def animate_title():
-    ascii_art = [
-        f"{bcolors.BOLD} /$$$$$$$$ /$$$$$$  /$$      /$$ /$$$$$$$  /$$     /$$",
-        "|__  $$__//$$__  $$| $$$    /$$$| $$__  $$|  $$   /$$/",
-        "   | $$  | $$  \\ $$| $$$$  /$$$$| $$  \\ $$ \\  $$ /$$/ ",
-        "   | $$  | $$$$$$$$| $$ $$/$$ $$| $$$$$$$/  \\  $$$$/  ",
-        "   | $$  | $$__  $$| $$  $$$| $$| $$____/    \\  $$/   ",
-        "   | $$  | $$  | $$| $$\\  $ | $$| $$          | $$    ",
-        "   | $$  | $$  | $$| $$ \\/  | $$| $$          | $$    ",
-        "   |__/  |__/  |__/|__/     |__/|__/          |__/     ",
-        f"                                                       {bcolors.ENDC}",
-    ]
-    max_shift = 10
-    for shift in range(max_shift):
-        os.system("cls" if os.name == "nt" else "clear")
-        for line in ascii_art:
-            print(" " * shift + line)
-        time.sleep(0.05)
-    for shift in range(max_shift, -1, -1):
-        os.system("cls" if os.name == "nt" else "clear")
-        for line in ascii_art:
-            print(" " * shift + line)
-        time.sleep(0.05)
-    os.system("cls" if os.name == "nt" else "clear")
-    for line in ascii_art:
-        print(line)
-    print(f"{bcolors.BOLD}created by @1ukz{bcolors.ENDC}")
-    print("------------------------------------------------------------\n\n")
-    time.sleep(0.5)
-
-
-def url_menu():
-    url_input = input(f"{bcolors.BOLD}Enter the URL to analyze: {bcolors.ENDC}").strip()
-    if not (url_input.startswith("http://") or url_input.startswith("https://")):
-        pattern = re.compile(r"^([a-z0-9-]+\.)+[a-z]{2,}$", re.IGNORECASE)
-        if url_input.startswith("www."):
-            modified_url = "https://" + url_input
-        elif pattern.match(url_input):
-            modified_url = "https://www." + url_input
-        else:
-            print(
-                f"{bcolors.BOLD}{bcolors.FAIL}URL does not have an expected format. Please check it and try again.{bcolors.ENDC}"
-            )
-            return None
-        print(
-            f"{bcolors.WARNING}[WARNING]: URL modified to: {modified_url}{bcolors.ENDC}"
-        )
-        url_input = modified_url
-    return url_input
-
-
 def phase_1(url_input, webtechs_dir):
-    """
-    - Checks if a previous analysis file exists in 'webtechs' folder.
-    - Otherwise, run a new analysis, store the .log, and parse for e-commerce.
-    """
-    print(
-        f"{bcolors.BOLD}{bcolors.HEADER}[PHASE 1]: WEB TECHNOLOGIES ENUMERATION{bcolors.ENDC}"
-    )
+
     parsed_url = urllib.parse.urlparse(url_input)
     domain = parsed_url.netloc.lower()
     if domain.startswith("www."):
@@ -98,13 +42,13 @@ def phase_1(url_input, webtechs_dir):
 
     if os.path.exists(filename):
         print(
-            f"{bcolors.OKBLUE}[INFO]: A log file has been found for this URL. {bcolors.ENDC}"
+            f"{bcolors.OKBLUE}[INFO]: A web techs enumeration log file has been found for this URL. {bcolors.ENDC}"
         )
         if yes_no_menu(
             f"{bcolors.BOLD}Do you want to use the existing log file and skip enumeration? (y/n): {bcolors.ENDC}"
         ):
             print(
-                f"{bcolors.OKBLUE}[INFO]: Using existing log: {filename}{bcolors.ENDC}"
+                f"{bcolors.OKBLUE}[INFO]: Using existing web techs enumeration log: {filename}{bcolors.ENDC}"
             )
             time.sleep(1)
             ecommerce_found = parse_existing_file_for_ecommerce(filename)
@@ -157,18 +101,17 @@ def phase_2(url_input, packets_dir, actions_path):
             print(
                 f"{bcolors.OKBLUE}[INFO]: Using existing files: {har_file}, {har_raw}, {actions_filename}{bcolors.ENDC}"
             )
-            har_filename_filtered = har_file if os.path.exists(har_file) else None
+            har_filename_filtered = har_file
             har_filename_raw = har_raw
             actions_file = actions_filename
-            if not har_filename_filtered:
-                # Parse HAR if filtered file doesn't exist yet
-                har_filename_filtered = parse_har(har_raw, har_file, domain)
+
             if not har_filename_filtered or not har_filename_raw or not actions_file:
                 print(
-                    f"{bcolors.FAIL}[ERROR]: No packets were captured or could not be analyzed.{bcolors.ENDC}"
+                    f"{bcolors.FAIL}[ERROR]: Existing files could not be saved correctly. Unable to proceed with the analysis.{bcolors.ENDC}"
                 )
                 return None
             return har_filename_filtered, har_filename_raw, actions_file
+
     # 1) Record user session with Playwright
     (
         har_filename_raw,
@@ -176,12 +119,12 @@ def phase_2(url_input, packets_dir, actions_path):
     ) = record_user_session_pw(url_input, har_raw, actions_filename)
 
     # 2) Parse and filter HAR into JSON
-    if har_filename_raw and actions_filename:
+    if har_filename_raw and actions_file:
         har_filename_filtered = parse_har(har_raw, har_file, domain)
 
-    if not har_filename_filtered or not har_filename_raw or not actions_file:
+    if not har_filename_filtered:
         print(
-            f"{bcolors.FAIL}[ERROR]: No packets were captured or could not be analyzed.{bcolors.ENDC}"
+            f"{bcolors.FAIL}[ERROR]: Packets could not be filtered. Unable to proceed with the analysis.{bcolors.ENDC}"
         )
         return None
     return har_filename_filtered, har_filename_raw, actions_file
@@ -206,12 +149,16 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
             print(
                 f"{bcolors.OKBLUE}[INFO]: Using existing analysis file.{bcolors.ENDC}"
             )
+            time.sleep(1)
             with open(analysis_filename, "r", encoding="utf-8") as f:
                 result = json.load(f)
             print_ai_answer(result)
             return result
 
-    spinner2 = Halo(text="Analyzing packets... Please wait patiently.", spinner="stars")
+    spinner2 = Halo(
+        text="Analyzing packets... \nPlease wait patiently, this may take a little while.",
+        spinner="stars",
+    )
     spinner2.start()
 
     # Pass spinner to analyzer
@@ -251,7 +198,9 @@ def phase_4(har_filtered, url_input, json_result, actions_file):
 
 
 def startup():
-    print(f"{bcolors.BOLD}{bcolors.OKBLUE}[INFO]: Welcome to TAMPY v1.0!{bcolors.ENDC}")
+    print(
+        f"{bcolors.BOLD}{bcolors.OKBLUE}[INFO]: Welcome to TAMPY v1.0!{bcolors.ENDC}\n"
+    )
 
     load_dotenv()
 
@@ -280,6 +229,13 @@ def load_args():
         "-R", "--remote", action="store_true", help="Use a remote LLM API"
     )
     parser.add_argument(
+        "-U",
+        "--url",
+        type=str,
+        help="Provide a URL to analyze and skip prompt (default: none)",
+        default=None,
+    )
+    parser.add_argument(
         "-S",
         "--stream",
         action="store_true",
@@ -296,17 +252,18 @@ def load_args():
     mode = "local" if args.local else "remote"
     streaming = bool(args.stream)
     show_think = bool(args.think)
+    url_input = args.url if args.url else None
 
-    return mode, streaming, show_think
+    return mode, streaming, show_think, url_input
 
 
 def main():
-    mode, streaming, show_think = load_args()
+    mode, streaming, show_think, url_skip_prompt = load_args()
     animate_title()
     logs_dir, webtechs_dir, packets_dir, actions_path, analysis_dir = startup()
 
     while True:
-        url_input = url_menu()
+        url_input = url_menu(url_skip_prompt)
         if url_input:
             if verify_website_exists(url_input):
                 ecommerce_found, prefix = phase_1(url_input, webtechs_dir)

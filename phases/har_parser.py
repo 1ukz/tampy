@@ -1,7 +1,6 @@
 import json
 import gzip
 import zlib
-import os
 from resources.bcolors import bcolors
 
 

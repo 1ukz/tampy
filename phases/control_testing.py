@@ -1,22 +1,11 @@
-import re
-import shutil
-import subprocess
-import sys
-import traceback
 from phases.replay_flow import replay_flow
 from resources.bcolors import bcolors
 from resources.yes_no_menu import yes_no_menu
 import json
-import os
-import asyncio
 
 
 def edit_packet(har_filtered, url_input, json_result, actions_file):
     print(f"{bcolors.OKBLUE}[INFO]: Available entries:{bcolors.ENDC}")
-
-    # Create replay directory if not exists
-    replay_dir = os.path.join(os.path.dirname(actions_file), "replay")
-    os.makedirs(replay_dir, exist_ok=True)
 
     for i, item in enumerate(json_result):
         print(
@@ -91,61 +80,9 @@ def edit_packet(har_filtered, url_input, json_result, actions_file):
         f"{bcolors.OKBLUE}[INFO]: Replaying packets with your modification...{bcolors.ENDC}"
     )
 
-    # Create modified actions file
-    modified_actions = os.path.join(
-        replay_dir, f"modified_{os.path.basename(actions_file)}"
-    )
-    shutil.copy(actions_file, modified_actions)
-
-    # Inject modification code into actions script
-    with open(modified_actions, "r+", encoding="utf-8") as f:
-        content = f.read()
-
-        # Find page creation line
-        page_creation = re.search(r"page\s*=\s*await context\.new_page\(\)", content)
-        if not page_creation:
-            print(
-                f"{bcolors.FAIL}[ERROR]: Couldn't find page creation in actions script{bcolors.ENDC}"
-            )
-            return
-
-        # Insert route handler after page creation
-        start_pos = page_creation.end()
-        new_content = (
-            content[:start_pos]
-            + "\n\n"
-            + ROUTE_HANDLER_TEMPLATE.format(
-                orig_method=json.dumps(original_method),
-                orig_url=json.dumps(original_url),
-                new_method=json.dumps(mod_req["method"]),
-                new_headers=json.dumps(mod_req.get("headers", {})),
-                new_body=json.dumps(mod_req.get("body", "")),
-            )
-            + content[start_pos:]
-        )
-
-        f.seek(0)
-        f.write(new_content)
-        f.truncate()
-
     # Replay with modified script
-    replay_flow(modified_actions, url_input)
+    replay_flow(actions_file)
 
     print(
-        f"{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: All packets replayed! Evaluate results.{bcolors.ENDC}"
+        f"{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: All packets replayed! Evaluate the results.{bcolors.ENDC}"
     )
-
-
-# Template for request interception
-ROUTE_HANDLER_TEMPLATE = """
-    # ------ TAMPY Request Interceptor ------
-    async def handle_route(route, request):
-        if request.method == {orig_method} and request.url == {orig_url}:
-            print("\\n>> Intercepting request: ", request.url)
-            await route.continue_(method={new_method}, headers={new_headers}, post_data={new_body})
-        else:
-            await route.continue_()
-            
-    await page.route("**/*", handle_route)
-    # ---------------------------------------
-"""
