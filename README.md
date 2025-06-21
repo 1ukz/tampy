@@ -1,5 +1,6 @@
 # TAMPY v1.0
-![Imagen de WhatsApp 2025-06-17 a las 22 32 16_806b9091](https://github.com/user-attachments/assets/71003213-54e5-46ac-8301-029e359bb376)
+<img src="https://github.com/user-attachments/assets/71003213-54e5-46ac-8301-029e359bb376" alt="TAMPY screenshot" width="300"/>
+
 
 **TAMPY** is a command-line tool designed to perform security assessments of e-commerce websites. It automates technology enumeration, HTTP packet recording, AI-driven analysis, and replay testing of tampered requests in order to test the business logic, architecture and purchase-flow security.
 
