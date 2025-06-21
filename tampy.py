@@ -2,6 +2,7 @@ import json
 import warnings
 from phases.har_parser import parse_har
 from resources.animate_title import animate_title
+from resources.control_refs import control_references
 
 warnings.filterwarnings(
     "ignore", category=UserWarning, message="pkg_resources is deprecated as an API.*"
@@ -31,7 +32,6 @@ from resources.yes_no_menu import yes_no_menu  # noqa: E402
 
 
 def phase_1(url_input, webtechs_dir):
-
     parsed_url = urllib.parse.urlparse(url_input)
     domain = parsed_url.netloc.lower()
     if domain.startswith("www."):
@@ -71,7 +71,7 @@ def phase_1(url_input, webtechs_dir):
     return ecommerce_found, prefix
 
 
-def phase_2(url_input, packets_dir, actions_path):
+def phase_2(url_input, packets_dir, actions_path, debug):
     print(
         f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 2]: USER SESSION RECORDING{bcolors.ENDC}"
     )
@@ -113,27 +113,47 @@ def phase_2(url_input, packets_dir, actions_path):
             return har_filename_filtered, har_filename_raw, actions_file
 
     # 1) Record user session with Playwright
-    (
-        har_filename_raw,
-        actions_file,
-    ) = record_user_session_pw(url_input, har_raw, actions_filename)
+    har_filename_raw, actions_file = record_user_session_pw(
+        url_input, har_raw, actions_filename
+    )
+
+    # Check if we got valid paths
+    if not har_filename_raw or not actions_file:
+        print(f"{bcolors.FAIL}[ERROR]: Session recording failed{bcolors.ENDC}")
+        return None, None, None
+
+    if debug:
+        print(f"{bcolors.OKCYAN}")
+        print(f"{bcolors.OKCYAN}[DEBUG] cwd is:        {os.getcwd()}")
+        print(f"[DEBUG] looking for:    {har_filename_raw}")
+        print(f"[DEBUG] dir listing of packets_dir: {os.listdir(packets_dir)}")
+        print(f"{bcolors.ENDC}")
 
     # 2) Parse and filter HAR into JSON
     if har_filename_raw and actions_file:
-        har_filename_filtered = parse_har(har_raw, har_file, domain)
+        har_filename_filtered, har_filename_filtered_anon = parse_har(
+            har_filename_raw, har_file, domain
+        )
 
-    if not har_filename_filtered:
+    if not har_filename_filtered or not har_filename_filtered_anon:
         print(
             f"{bcolors.FAIL}[ERROR]: Packets could not be filtered. Unable to proceed with the analysis.{bcolors.ENDC}"
         )
-        return None
-    return har_filename_filtered, har_filename_raw, actions_file
+        return None, None, None
+
+    return har_filename_filtered_anon, har_filename_raw, actions_file
 
 
 def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
     stream_mode = "streaming" if streaming else "non-streaming"
     print(
         f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 3]: ANALYZING HTTP PACKETS ({mode} {stream_mode} mode){bcolors.ENDC}"
+    )
+    time.sleep(0.5)
+    print(
+        f"{bcolors.OKBLUE}[INFO]: Evaluating the following controls: {bcolors.ENDC}\n\n"
+        + control_references()
+        + "\n"
     )
     time.sleep(1)
 
@@ -149,15 +169,14 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
             print(
                 f"{bcolors.OKBLUE}[INFO]: Using existing analysis file.{bcolors.ENDC}"
             )
-            time.sleep(1)
+            time.sleep(0.5)
             with open(analysis_filename, "r", encoding="utf-8") as f:
                 result = json.load(f)
             print_ai_answer(result)
             return result
-
     spinner2 = Halo(
-        text="Analyzing packets... \nPlease wait patiently, this may take a little while.",
-        spinner="stars",
+        text="Analyzing packets... Please wait patiently, this may take a little while.",
+        spinner="dots",
     )
     spinner2.start()
 
@@ -189,12 +208,7 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
 
 def phase_4(har_filtered, url_input, json_result, actions_file):
     print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 4]: CONTROL TESTING{bcolors.ENDC}")
-    while True:
-        edit_packet(har_filtered, url_input, json_result, actions_file)
-        if not yes_no_menu(
-            f"{bcolors.BOLD}Test another control? (y/n): {bcolors.ENDC}"
-        ):
-            break
+    edit_packet(har_filtered, url_input, json_result, actions_file)
 
 
 def startup():
@@ -247,31 +261,68 @@ def load_args():
         action="store_true",
         help="Display chain-of-reasoning thinking of the LLM output (default: false)",
     )
+    parser.add_argument(
+        "-D",
+        "--debug",
+        action="store_true",
+        help="Debug mode to print extra information (default: false)",
+    )
     args = parser.parse_args()
 
     mode = "local" if args.local else "remote"
     streaming = bool(args.stream)
     show_think = bool(args.think)
     url_input = args.url if args.url else None
+    debug = bool(args.debug)
 
-    return mode, streaming, show_think, url_input
+    return mode, streaming, show_think, url_input, debug
 
 
 def main():
-    mode, streaming, show_think, url_skip_prompt = load_args()
+    mode, streaming, show_think, url_skip_prompt, debug = load_args()
     animate_title()
     logs_dir, webtechs_dir, packets_dir, actions_path, analysis_dir = startup()
-
+    another_url = False
     while True:
-        url_input = url_menu(url_skip_prompt)
+        url_input = url_menu(url_skip_prompt, another_url)
         if url_input:
             if verify_website_exists(url_input):
                 ecommerce_found, prefix = phase_1(url_input, webtechs_dir)
                 if not ecommerce_found:
-                    har_filename, har_filename_raw, actions_file = phase_2(
-                        url_input, packets_dir, actions_path
-                    )
-                    if har_filename and har_filename_raw and actions_file:
+                    phase_2_success = False
+                    har_filename = None
+                    har_filename_raw = None
+                    actions_file = None
+                    try:
+                        har_filename, har_filename_raw, actions_file = phase_2(
+                            url_input, packets_dir, actions_path, debug
+                        )
+                        phase_2_success = True
+                    except KeyboardInterrupt:
+                        print(
+                            f"{bcolors.OKBLUE}[INFO]: Recording stopped by user.{bcolors.ENDC}"
+                        )
+                        # Check if files were created
+                        har_file = os.path.join(packets_dir, f"{prefix}_packets.json")
+                        har_raw = os.path.join(packets_dir, f"{prefix}_raw_packets.har")
+                        actions_filename = os.path.join(
+                            actions_path, f"{prefix}_actions.py"
+                        )
+                        if (
+                            os.path.exists(har_file)
+                            and os.path.exists(har_raw)
+                            and os.path.exists(actions_filename)
+                        ):
+                            har_filename = har_file
+                            har_filename_raw = har_raw
+                            actions_file = actions_filename
+                            phase_2_success = True
+                        else:
+                            print(
+                                f"{bcolors.FAIL}[ERROR]: Recording incomplete, files not saved.{bcolors.ENDC}"
+                            )
+
+                    if phase_2_success:
                         json_result = phase_3(
                             har_filename,
                             mode,
@@ -282,6 +333,10 @@ def main():
                         )
                         if json_result:
                             phase_4(har_filename, url_input, json_result, actions_file)
+                    else:
+                        print(
+                            f"{bcolors.FAIL}[ERROR]: Phase 2 did not produce required files.{bcolors.ENDC}"
+                        )
                 else:
                     print(
                         f"{bcolors.BOLD}{bcolors.FAIL}[ERROR]: The assessment cannot continue as an E-Commerce platform was found :({bcolors.ENDC}"
@@ -299,6 +354,7 @@ def main():
             f"{bcolors.BOLD}\nDo you want to try a new website? (y/n): {bcolors.ENDC}"
         ):
             break
+        another_url = True
 
     print(
         f"{bcolors.BOLD}{bcolors.OKCYAN}\nGoodbye! Thank you for using TAMPY :){bcolors.ENDC}"

@@ -16,17 +16,17 @@ def animate_title():
         "   |__/  |__/  |__/|__/     |__/|__/          |__/     ",
         f"                                                       {bcolors.ENDC}",
     ]
-    max_shift = 10
+    max_shift = 8
     for shift in range(max_shift):
         os.system("cls" if os.name == "nt" else "clear")
         for line in ascii_art:
             print(" " * shift + line)
-        time.sleep(0.05)
+        time.sleep(0.035)
     for shift in range(max_shift, -1, -1):
         os.system("cls" if os.name == "nt" else "clear")
         for line in ascii_art:
             print(" " * shift + line)
-        time.sleep(0.05)
+        time.sleep(0.035)
     os.system("cls" if os.name == "nt" else "clear")
     for line in ascii_art:
         print(line)

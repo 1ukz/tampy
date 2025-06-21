@@ -6,17 +6,18 @@ from resources.bcolors import bcolors
 import requests
 
 
-def url_menu(url_skip_prompt):
+def url_menu(url_skip_prompt, another_url):
     print(
         f"{bcolors.BOLD}{bcolors.HEADER}[PHASE 1]: WEB TECHNOLOGIES ENUMERATION{bcolors.ENDC}"
     )
     url_input = ""
 
-    if url_skip_prompt is not None:
+    if url_skip_prompt is not None and another_url is False:
         url_input = url_skip_prompt.strip()
         print(
             f"{bcolors.BOLD}{bcolors.OKGREEN} Using the provided URL: {url_input} {bcolors.ENDC}"
         )
+        another_url = True
     else:
         url_input = input(
             f"{bcolors.BOLD}Enter the URL to analyze: {bcolors.ENDC}"
@@ -33,9 +34,7 @@ def url_menu(url_skip_prompt):
                 f"{bcolors.BOLD}{bcolors.FAIL}URL does not have an expected format. Please check it and try again.{bcolors.ENDC}"
             )
             return None
-        print(
-            f"{bcolors.WARNING}[WARNING]: URL modified to: {modified_url}{bcolors.ENDC}"
-        )
+        print(f"{bcolors.OKBLUE}[INFO]: URL modified to: {modified_url}{bcolors.ENDC}")
         url_input = modified_url
     return url_input
 

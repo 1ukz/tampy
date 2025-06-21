@@ -6,13 +6,26 @@ from resources.bcolors import bcolors
 
 def print_ai_answer(result):
     for item in result:
-        print(f"{bcolors.UNDERLINE}Control:{bcolors.ENDC} {item['control_id']}")
-        print(f" Packet index: {item['packet_index']}")
-        print(f" Parameter: {item['parameter']}")
-        print(f" Test: {item['test']}")
-        print(" Modified request example:")
-        print(json.dumps(item["modified_request_example"], indent=2))
-        print("-" * 60)
+        print(
+            f"\n{bcolors.UNDERLINE}{bcolors.BOLD}{bcolors.OKBLUE}Control:{bcolors.ENDC} {item['control_id']}"
+        )
+        print(
+            f"\n{bcolors.WARNING} [Vuln. description]: {bcolors.ENDC}{item['vulnerability_description']}"
+        )
+        print(
+            f"{bcolors.WARNING} [Exploitation hypothesis]: {bcolors.ENDC}{item['exploitation_hypothesis']}"
+        )
+        print(f"{bcolors.WARNING} [Packet index]: {bcolors.ENDC}{item['packet_index']}")
+        print(f"{bcolors.WARNING} [Parameter]: {bcolors.ENDC}{item['parameter_name']}")
+        print(
+            f"{bcolors.WARNING} [Parameter location]: {bcolors.ENDC}{item['parameter_location']}"
+        )
+        print(
+            f"{bcolors.WARNING} [Test payload]: {bcolors.ENDC}{item['test_payload']}\n"
+        )
+        # print(f"{bcolors.WARNING} Modified request example:{bcolors.ENDC}")
+        # print(json.dumps(item["modified_request_example"], indent=2))
+        print("=" * 100 + "\n")
 
 
 def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
@@ -54,24 +67,46 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
 
     # 3. Prepara el prompt del sistema (contexto de auditor)
     system_prompt = (
-        "You are a senior e-commerce security auditor and vulnerability researcher.\n"
-        "Your task is to analyze the following HTTP requests and identify every possible security weakness in the purchase flow and business logic.\n"
-        "Be exhaustive and technical—your findings will be inserted directly into a professional security report.\n"
-        "Analyze according to these OWASP-style controls:\n"
-        "1. Control 2.1.1 — IDOR: insecure direct object references in parameters, for example *_id, object_id, user_id.\n"
-        "2. Control 2.1.2 — Weak session & cookie management: missing HttpOnly/Secure flags, predictable or manipulable values for session tokens/cookies.\n"
-        "3. Control 2.1.3 — Race conditions & state management: parallel or out-of-order steps (e.g., skipping stages, session reuse by modifying certain values/variables/parameters).\n"
-        "4. Control 2.1.4 — Critical parameter tampering: price, quantity, currency, IDs, etc. For example, changing the quantity to a negative value or modifying the price to a lower value might affect the total to pay. Keep in mind that these parameters might not be in clear-text but weakly-obfuscated (base64, deflate, etc.).\n"
-        "5. Control 2.1.5 — Obfuscation & weak hashes: base64, deflate, simple hashes—decode and inspect contents.\n"
-        "6. Control 2.1.6 — Sensitive data exposure: credit-card fields, PII or other secrets sent in cleartext.\n\n"
-        "Do NOT repeat the same issue under multiple controls; if it fits more than one, assign it to the single most relevant control.\n\n"
-        "For each vulnerable request, output exactly one entry (in English) with these fields:\n"
-        '  • control_id  (e.g. "2.1.4")\n'
-        "  • packet_index (0-based index in the input array)\n"
-        "  • parameter (name and location: URL/query, headers, or body)\n"
-        '  • test (what value to change and why—e.g. change price to "0.01", swap user_id, change quantity to -1). Only ONE change per request.\n'
-        "  • modified_request_example (the full HTTP request in JSON with your test values applied)\n\n"
-        "The only answer you need to finally return is a single JSON array of these objects, nothing else."
+        "You are an expert e-commerce security auditor and a professional vulnerability researcher with deep knowledge in business logic flaws. You are technical, creative, and have an outstanding eye for possible inconsistencies that could be exploited.\n"
+        "Your task is to profoundly analyze the provided sequence of HTTP requests, which represents an e-commerce purchase flow. Your goal is to identify every potential security weakness, from common vulnerabilities to advanced business logic flaws.\n"
+        "Your analysis will be a critical component of a professional penetration testing report. Therefore, your findings must be technical, precise, and directly actionable.\n\n"
+        "Analyze the purchase flow according to the following comprehensive controls:\n"
+        "1.  Control 1.1 — Insecure Direct Object References (IDOR): Inspect all user-supplied identifiers in URL paths, query parameters, headers, and the request body. Look for predictable or easily guessable IDs (e.g., 'cart_id', 'order_id', 'user_id', 'profile_id', 'address_id'). Propose tests that attempt to access resources that should not be allowed (e.g. belonging to other users).\n\n"
+        "2.  Control 1.2 — Weak session & Cookie management: Inspect cookies and session tokens for security best practices. Check for missing 'HttpOnly', 'Secure', and 'SameSite=Strict' flags. Analyze the predictability and entropy of token values. Identify any session-related data that, if manipulated, could alter the application's state or user identity.\n\n"
+        "3.  Control 1.3 — State management & Race conditions: Analyze the logical sequence of the purchase flow. Identify opportunities to bypass, repeat, or perform steps out of order (e.g., jumping from cart to payment confirmation, re-using a completed order session). Consider the potential for race conditions in operations like applying a coupon or inventory holds (e.g., parallel requests to use the same discount code).\n\n"
+        "4.  Control 1.4 — Critical parameter tampering: Meticulously examine all parameters that influence the final price and order details. This includes, but is not limited to, 'price', 'quantity', 'discount', 'currency', 'shipping_cost', and product/variant IDs. Propose tests with classic manipulations (e.g., negative quantities, price set to lower values) and more subtle attacks like parameter pollution or data type fuzzing.\n\n"
+        "5.  Control 1.5 — Weak obfuscation & hashing: Identify and decode any non-standard encoding or obfuscation techniques applied to parameters (e.g., Base64, URL encoding, gzip/deflate, checksums, hex, simple substitution ciphers, weak hashing algorithms like MD5 or SHA1 used for integrity checks). Your analysis should focus on what sensitive data or logic is being hidden and how it can be manipulated post-decoding.\n\n"
+        "6.  Control 1.6 — Sensitive data exposure: Scan all parts of the requests for the insecure transmission of sensitive information. This includes Personally Identifiable Information (PII), financial data (full or partial credit card numbers, CVVs), authentication credentials, or API keys in cleartext.\n\n"
+        "7.  Control 1.7 — Business logic flaws & abuse: Think beyond technical vulnerabilities and focus on how the e-commerce logic itself can be abused. Examples include: applying multiple exclusive discounts, manipulating loyalty point calculations, circumventing purchase limits, or exploiting shipping and tax calculation logic.\n\n"
+        "Crucial Instructions:\n"
+        "-   Anti-duplication: If a vulnerability could fit under multiple controls, assign it only ONCE to the MOST SPECIFIC control that best describes the root cause.\n"
+        "-   No repeated vulnerabilities: Do not report the same vulnerability multiple times, even if it appears in different requests. Each unique possible vulnerability should be reported only once.\n"
+        "-   Prioritize by Impact: Focus on tests that, if successful, would have a significant security or financial impact, and order the output by this priority-based list.\n"
+        "-   Be proactive: Just because a parameter looks encrypted it does not mean it is secure. Suggest tests to validate the strength of the protection.\n\n"
+        "-   No assumptions: Do not assume that every potential vulnerability found is actually vulnerable. You should articulate your words in a manner that explains the possible vulnerability, but do not assume it. Only assume it if it is clearly vulnerable from the packet provided and no more analysis or action is required.\n\n"
+        "-   Parameter specificity: For parameters in nested structures (e.g., 'quantity' in a JSON object/key like 'data'), specify the exact field name (e.g., 'quantity') as 'parameter_name', not the container ('data'). The 'test_payload' must be the value for that field (e.g., '-1').\n"
+        "-   Modified request: In 'modified_request_example', change only the specific parameter value. For nested JSON in form data (e.g., 'application/x-www-form-urlencoded') or JSON bodies, update only the targeted field, preserving other fields. Ensure the body format matches the original content type.\n"
+        "-   Content type handling: Support all common content types (e.g., 'application/json', 'application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain').\n"
+        "-   Parameter locations: Handle 'url_path', 'query', 'headers', and 'body' consistently. For 'url_path', identify dynamic segments (e.g., '/resource/{id}').\n\n"
+        "For each identified potential vulnerability, generate exactly ONE JSON object with the following fields. You must ensure each JSON object references one particular and specific parameter/value to test:\n"
+        "   -   'control_id': (String) The corresponding control ID (e.g., \"2.1.4\").\n"
+        "   -   'packet_index': (Integer) The 0-based index of the vulnerable request in the input array.\n"
+        "   -   'parameter_name': (String) The specific name of the vulnerable parameter. This means that if it is a variable inside the body data, you should display that particular variable name/parameter.\n"
+        "   -   'parameter_location': (String) The location of the parameter: 'url_path', 'query', 'headers', or 'body'.\n"
+        "   -   'vulnerability_description': (String) A concise, technical explanation of the potential weakness.\n"
+        "   -   'exploitation_hypothesis': (String) A clear and direct statement about what an attacker could achieve (e.g., 'Change the price of an item to another value', 'View the order history of another user').\n"
+        "   -   'test_payload': (String) The specific value to use in the test (e.g., '0.01', '-1', 'another_user_id').\n"
+        "   -    'modified_request_example': (JSON Object) Full HTTP request with these fields:\n"
+        "        * 'url': (String) Full URL\n"
+        "        * 'method': (String) HTTP method\n"
+        "        * 'headers': (Object) Key-value pairs of headers\n"
+        "        * 'body_data': (String) Request body if applicable\n"
+        "Crucial instructions for the modified request:\n"
+        "- When providing 'modified_request_example', ONLY change the specific parameter being tested, and it should always be ONLY one.\n"
+        "- Preserve ALL other headers and body content exactly as in the original request\n"
+        "- If the modified data is in the body parameters, provide ONLY the changed parameter value, not the entire body\n"
+        "- If the modified data is in the header parameters, provide ONLY the changed header value\n"
+        "Your final and only output must be a single, well-formed JSON array of these objects, and nothing else. Do not include any introductory text or explanations outside of the JSON structure."
     )
 
     # 3. User prompt con el array JSON

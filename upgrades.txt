@@ -1,7 +1,11 @@
-- allow also chromedriver not only geckodriver
-- gui?
-- AI also browses through website without the need of the manual input of user (using coordinates axis letting know selenium where to click, or using an interactive agent such as agentSeek) 
-- generar reporte automaticamente con lo hayado una vez se ha hecho las pruebas
-- depurar mas logs de peticiones para que tarde menos la ia y ganar eficiencia
+- gui option?
+- in phase 1, also check for defenses (such as WAF)
 - break the dependency with the wappalyzer-next package (and needing mozilla)
+- in phase 2, AI also browses through website without the need of the manual input of user (using coordinates axis letting know selenium where to click, or using an interactive agent such as agentSeek) 
+- in phase 3, depurar mas logs de peticiones para que tarde menos la ia y ganar eficiencia
+- in phase 3, show a message informing of the controls that are being evaluated (using rich )
+- in phase 5, generar reporte automaticamente con lo hayado una vez se ha hecho las pruebas (si da tiempo se hace)
+- async to run more than one analysis per execution
+- save in logs in particular files for each domain
+
 
