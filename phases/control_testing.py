@@ -1,3 +1,4 @@
+import re
 import sys
 import time
 import json
@@ -8,9 +9,12 @@ from resources.yes_no_menu import yes_no_menu
 
 
 def replace_domain(data, actual_domain):
-    """Recursively replace PRIVATE_DOMAIN in all string values"""
+    """Recursively replace PRIVATE_DOMAIN.com in all string values."""
     if isinstance(data, str):
-        return data.replace("www.PRIVATE_DOMAIN.com", actual_domain)
+        # replace both with and without www.
+        data = re.sub(r"\bPRIVATE_DOMAIN\.com\b", actual_domain, data)
+        data = re.sub(r"\bwww\.PRIVATE_DOMAIN\.com\b", actual_domain, data)
+        return data
     elif isinstance(data, dict):
         return {k: replace_domain(v, actual_domain) for k, v in data.items()}
     elif isinstance(data, list):

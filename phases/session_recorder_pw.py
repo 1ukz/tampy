@@ -22,6 +22,9 @@ def record_user_session(url, har_path, actions_path):
     cmd = [
         "playwright",
         "codegen",
+        "--browser",
+        "chromium",
+        "--ignore-https-errors",  # Ignore SSL errors
         "--target",
         "python",
         "-o",

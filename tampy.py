@@ -110,7 +110,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
                     f"{bcolors.FAIL}[ERROR]: Existing files could not be saved correctly. Unable to proceed with the analysis.{bcolors.ENDC}"
                 )
                 return None
-            return har_filename_filtered, har_filename_raw, actions_file
+            return har_filename_filtered, actions_file
 
     # 1) Record user session with Playwright
     har_filename_raw, actions_file = record_user_session_pw(
@@ -119,7 +119,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
 
     # Check if we got valid paths
     if not har_filename_raw or not actions_file:
-        print(f"{bcolors.FAIL}[ERROR]: Session recording failed{bcolors.ENDC}")
+        print(f"{bcolors.FAIL}[ERROR]: Session recording failed.{bcolors.ENDC}")
         return None, None, None
 
     if debug:
@@ -141,7 +141,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
         )
         return None, None, None
 
-    return har_filename_filtered_anon, har_filename_raw, actions_file
+    return har_filename_filtered_anon, actions_file
 
 
 def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
@@ -286,15 +286,17 @@ def main():
     while True:
         url_input = url_menu(url_skip_prompt, another_url)
         if url_input:
-            if verify_website_exists(url_input):
+            if (
+                verify_website_exists(url_input)
+                or url_input == "https://127.0.0.1:5000/"
+            ):
                 ecommerce_found, prefix = phase_1(url_input, webtechs_dir)
                 if not ecommerce_found:
                     phase_2_success = False
                     har_filename = None
-                    har_filename_raw = None
                     actions_file = None
                     try:
-                        har_filename, har_filename_raw, actions_file = phase_2(
+                        har_filename, actions_file = phase_2(
                             url_input, packets_dir, actions_path, debug
                         )
                         phase_2_success = True
@@ -302,6 +304,10 @@ def main():
                         print(
                             f"{bcolors.OKBLUE}[INFO]: Recording stopped by user.{bcolors.ENDC}"
                         )
+                        if not har_filename or not actions_file:
+                            print(
+                                f"{bcolors.FAIL}[ERROR]: Recording was interrupted, no files saved.{bcolors.ENDC}"
+                            )
                         # Check if files were created
                         har_file = os.path.join(packets_dir, f"{prefix}_packets.json")
                         har_raw = os.path.join(packets_dir, f"{prefix}_raw_packets.har")
@@ -314,12 +320,11 @@ def main():
                             and os.path.exists(actions_filename)
                         ):
                             har_filename = har_file
-                            har_filename_raw = har_raw
                             actions_file = actions_filename
                             phase_2_success = True
                         else:
                             print(
-                                f"{bcolors.FAIL}[ERROR]: Recording incomplete, files not saved.{bcolors.ENDC}"
+                                f"{bcolors.FAIL}[ERROR]: Recording was interrupted, no files saved.{bcolors.ENDC}"
                             )
 
                     if phase_2_success:

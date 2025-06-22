@@ -10,6 +10,8 @@ from io import BytesIO
 from playwright.sync_api import sync_playwright, TimeoutError
 from resources.bcolors import bcolors
 
+# --- Tampering Script ---
+
 PAUSE_SNIPPET = [
     "    # ---------------------\n",
     "    from resources.bcolors import bcolors \n",
@@ -20,45 +22,83 @@ PAUSE_SNIPPET = [
 
 
 def decode_value(value):
-    """Attempt to decode a value using common encodings and return decoded data with encoding type."""
-    # Try as plain JSON first
+    """Decode a value using common encodings and return decoded data with encoding type."""
     try:
-        json_data = json.loads(value)
-        if isinstance(json_data, dict):
-            return json_data, None
-    except json.JSONDecodeError:
+        base64_decoded_bytes = base64.b64decode(value)
+        try:
+            decompressed = zlib.decompress(base64_decoded_bytes).decode("utf-8")
+            try:
+                return json.loads(decompressed), "base64+deflate"
+            except json.JSONDecodeError:
+                return decompressed, "base64+deflate"
+        except zlib.error:
+            try:
+                with gzip.GzipFile(fileobj=BytesIO(base64_decoded_bytes)) as f:
+                    decompressed = f.read().decode("utf-8")
+                try:
+                    return json.loads(decompressed), "base64+gzip"
+                except json.JSONDecodeError:
+                    return decompressed, "base64+gzip"
+            except (OSError, zlib.error):
+                try:
+                    decoded_str = base64_decoded_bytes.decode("utf-8")
+                    try:
+                        return json.loads(decoded_str), "base64"
+                    except json.JSONDecodeError:
+                        return decoded_str, "base64"
+                except UnicodeDecodeError:
+                    pass
+    except (base64.binascii.Error, UnicodeDecodeError):
         pass
 
-    # Try Base64
     try:
-        base64_decoded = base64.b64decode(value).decode("utf-8")
-        json_data = json.loads(base64_decoded)
-        if isinstance(json_data, dict):
-            return json_data, "base64"
-    except (base64.binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
+        decompressed = zlib.decompress(value.encode("latin1")).decode("utf-8")
+        try:
+            return json.loads(decompressed), "deflate"
+        except json.JSONDecodeError:
+            return decompressed, "deflate"
+    except zlib.error:
         pass
 
-    # Try gzip
     try:
         with gzip.GzipFile(fileobj=BytesIO(value.encode("latin1"))) as f:
             decompressed = f.read().decode("utf-8")
-        json_data = json.loads(decompressed)
-        if isinstance(json_data, dict):
-            return json_data, "gzip"
-    except (OSError, zlib.error, json.JSONDecodeError):
+        try:
+            return json.loads(decompressed), "gzip"
+        except json.JSONDecodeError:
+            return decompressed, "gzip"
+    except (OSError, zlib.error):
         pass
 
-    # Try deflate
     try:
-        decompressed = zlib.decompress(value.encode("latin1")).decode("utf-8")
-        json_data = json.loads(decompressed)
-        if isinstance(json_data, dict):
-            return json_data, "deflate"
-    except (zlib.error, json.JSONDecodeError):
-        pass
+        return json.loads(value), None
+    except json.JSONDecodeError:
+        return value, None
 
-    # Return original value if no decoding works
-    return value, None
+
+def encode_value(value, encoding):
+    """Re-encode a value using the specified encoding."""
+    if isinstance(value, dict):
+        value = json.dumps(value)
+    if encoding == "base64+deflate":
+        compressed = zlib.compress(value.encode("utf-8"))
+        return base64.b64encode(compressed).decode("utf-8")
+    elif encoding == "base64+gzip":
+        buf = BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode="wb") as f:
+            f.write(value.encode("utf-8"))
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    elif encoding == "base64":
+        return base64.b64encode(value.encode("utf-8")).decode("utf-8")
+    elif encoding == "deflate":
+        return zlib.compress(value.encode("utf-8")).decode("latin1")
+    elif encoding == "gzip":
+        buf = BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode="wb") as f:
+            f.write(value.encode("utf-8"))
+        return buf.getvalue().decode("latin1")
+    else:
+        return value
 
 
 def setup_tampering(context, tamper_configs):
@@ -81,7 +121,6 @@ def setup_tampering(context, tamper_configs):
                 body_method = config.get("body_method", "")
                 overrides = {}
 
-                # Check body method for precise matching
                 body = request.post_data or ""
                 parsed_body = urllib.parse.parse_qs(body) if body else {}
                 request_body_method = parsed_body.get("Method", [""])[0]
@@ -112,7 +151,6 @@ def setup_tampering(context, tamper_configs):
                                     f"{bcolors.OKBLUE}[DEBUG] Parameter {param_name} value matches, skipping: {request.url}{bcolors.ENDC}"
                                 )
                         else:
-                            # Check for nested JSON parameters with encoding support
                             for key, values in parsed_body.items():
                                 for j, value in enumerate(values):
                                     decoded_value, encoding = decode_value(value)
@@ -127,36 +165,9 @@ def setup_tampering(context, tamper_configs):
                                             )
                                             print(f"  Original body: {body}")
                                             decoded_value[param_name] = new_value
-                                            if encoding == "base64":
-                                                modified_json = json.dumps(
-                                                    decoded_value
-                                                )
-                                                modified_value = base64.b64encode(
-                                                    modified_json.encode("utf-8")
-                                                ).decode("utf-8")
-                                            elif encoding == "gzip":
-                                                modified_json = json.dumps(
-                                                    decoded_value
-                                                ).encode("utf-8")
-                                                buf = BytesIO()
-                                                with gzip.GzipFile(
-                                                    fileobj=buf, mode="wb"
-                                                ) as f:
-                                                    f.write(modified_json)
-                                                modified_value = buf.getvalue().decode(
-                                                    "latin1"
-                                                )
-                                            elif encoding == "deflate":
-                                                modified_json = json.dumps(
-                                                    decoded_value
-                                                ).encode("utf-8")
-                                                modified_value = zlib.compress(
-                                                    modified_json
-                                                ).decode("latin1")
-                                            else:
-                                                modified_value = json.dumps(
-                                                    decoded_value
-                                                )
+                                            modified_value = encode_value(
+                                                decoded_value, encoding
+                                            )
                                             parsed_body[key][j] = modified_value
                                             body = urllib.parse.urlencode(
                                                 parsed_body, doseq=True
@@ -328,10 +339,9 @@ def replay_actions_with_tamper(actions_file, tamper_configs):
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
-        context = browser.new_context()
+        context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 
-        # Add body_method to tamper_configs for precise matching
         for config in tamper_configs:
             if "modified_request_example" in config:
                 body_data = urllib.parse.parse_qs(
@@ -342,8 +352,6 @@ def replay_actions_with_tamper(actions_file, tamper_configs):
         if tamper_configs:
             setup_tampering(context, tamper_configs)
 
-        max_retries = 3
-        for attempt in range(max_retries):
             try:
                 if hasattr(module, "run_actions"):
                     module.run_actions(page)
@@ -351,17 +359,9 @@ def replay_actions_with_tamper(actions_file, tamper_configs):
                     raise RuntimeError(
                         "No run_actions function found in actions script"
                     )
-                break
-            except TimeoutError as e:
-                print(
-                    f"{bcolors.WARNING}[RETRY] Timeout occurred: {e}. Retrying {attempt + 1}/{max_retries}{bcolors.ENDC}"
-                )
-                if attempt + 1 == max_retries:
-                    print(
-                        f"{bcolors.FAIL}[ERROR] Max retries reached. Replay failed.{bcolors.ENDC}"
-                    )
-                    raise
-                page.reload()
+
+            except Exception as e:
+                print(f"{bcolors.FAIL}[ERROR] Replay failed: {e}{bcolors.ENDC}")
 
         context.close()
         browser.close()
