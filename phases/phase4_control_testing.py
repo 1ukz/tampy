@@ -21,7 +21,7 @@ def replace_domain(data, actual_domain):
     return data
 
 
-def edit_packet(har_filtered, url_input, json_result, actions_file, debug):
+def edit_packet(url_input, json_result, actions_file, debug):
     print(f"{bcolors.OKBLUE}[INFO]: Available entries:{bcolors.ENDC}")
     actual_domain = urllib.parse.urlparse(url_input).netloc
 

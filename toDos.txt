@@ -9,3 +9,5 @@
 - se puede presentar como una herramienta para ayudar el desarrrollo o mas enfocado a auditoria, pensar en como presentarlo. 
 
 - se tiene que formalizar la metodología de lo que se va a hacer. Se tiene que seguir ciertos pasos formales y metódicos. Por ejemplo: Todos los parámetros se deben analizan, y los que aparezcan susceptibles a inyecciones, se deben de analizar mas a fondo. 
+
+- issue: si se utiliza -S o -T, el json no se guarda bien. hay que separar mediante split el prompt de pensamiento al del json, separando ```json ... ``` como output oficial.  

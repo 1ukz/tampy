@@ -24,7 +24,9 @@ from phases.phase1_webtech_rec import (  # noqa: E402
     verify_website_exists,
     parse_existing_file_for_ecommerce,
 )
-from phases.phase2_session_recorder_pw import record_user_session as record_user_session_pw  # noqa: E402
+from phases.phase2_session_recorder_pw import (
+    record_user_session as record_user_session_pw,
+)  # noqa: E402
 from phases.phase3_ai_analyzer import analyze_packets_with_ai, print_ai_answer  # noqa: E402
 from phases.phase4_control_testing import edit_packet  # noqa: E402
 from resources.bcolors import bcolors  # noqa: E402
@@ -125,7 +127,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
 
     if debug:
         print(f"{bcolors.OKCYAN}")
-        print(f"{bcolors.OKCYAN}[DEBUG] cwd is:        {os.getcwd()}")
+        print(f"[DEBUG] cwd is:        {os.getcwd()}")
         print(f"[DEBUG] looking for:    {har_filename_raw}")
         print(f"[DEBUG] dir listing of packets_dir: {os.listdir(packets_dir)}")
         print(f"{bcolors.ENDC}")
@@ -188,7 +190,7 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
 
     if not result:
         print(
-            f"{bcolors.FAIL}[ERROR]: No AI results to display. Please try again, or review the raw JSON response to insert it manually into {har_filename}\n. Raw response:{bcolors.ENDC}\n"
+            f"{bcolors.FAIL}[ERROR]: No AI results to display (error parsing the JSON answer). \nPlease try again, or review the raw JSON response to insert it manually into {har_filename}.\n Raw response:{bcolors.ENDC}\n"
         )
         print(raw_result or f"{bcolors.FAIL}(no raw text captured){bcolors.ENDC}")
         return None
@@ -207,9 +209,9 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
     return result
 
 
-def phase_4(har_filtered, url_input, json_result, actions_file, debug):
+def phase_4(url_input, json_result, actions_file, debug):
     print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 4]: CONTROL TESTING{bcolors.ENDC}")
-    edit_packet(har_filtered, url_input, json_result, actions_file, debug)
+    edit_packet(url_input, json_result, actions_file, debug)
 
 
 def startup():
@@ -342,7 +344,6 @@ def main():
                         )
                         if json_result:
                             phase_4(
-                                har_filename,
                                 url_input,
                                 json_result,
                                 actions_file,
