@@ -12,10 +12,7 @@ def url_menu(url_skip_prompt, another_url):
     )
     url_input = ""
 
-    if url_skip_prompt == "https://127.0.0.1:5000/":
-        return url_skip_prompt
-
-    if url_skip_prompt is not None and another_url is False:
+    if url_skip_prompt is not None and another_url is False or url_skip_prompt == "https://127.0.0.1:5000/":
         url_input = url_skip_prompt.strip()
         print(
             f"{bcolors.BOLD}{bcolors.OKGREEN} Using the provided URL: {url_input} {bcolors.ENDC}"

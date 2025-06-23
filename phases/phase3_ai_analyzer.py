@@ -1,6 +1,6 @@
 import os
 import json
-from openai import OpenAI  # cliente OpenAI utilizado también para DeepSeek
+from openai import OpenAI
 from resources.bcolors import bcolors
 
 
@@ -9,13 +9,13 @@ def print_ai_answer(result):
         print(
             f"\n{bcolors.UNDERLINE}{bcolors.BOLD}{bcolors.OKBLUE}Control:{bcolors.ENDC} {item['control_id']}"
         )
+        print(f"{bcolors.WARNING} [Packet index]: {bcolors.ENDC}{item['packet_index']}")
         print(
             f"\n{bcolors.WARNING} [Vuln. description]: {bcolors.ENDC}{item['vulnerability_description']}"
         )
         print(
             f"{bcolors.WARNING} [Exploitation hypothesis]: {bcolors.ENDC}{item['exploitation_hypothesis']}"
         )
-        print(f"{bcolors.WARNING} [Packet index]: {bcolors.ENDC}{item['packet_index']}")
         print(f"{bcolors.WARNING} [Parameter]: {bcolors.ENDC}{item['parameter_name']}")
         print(
             f"{bcolors.WARNING} [Parameter location]: {bcolors.ENDC}{item['parameter_location']}"
@@ -23,8 +23,8 @@ def print_ai_answer(result):
         print(
             f"{bcolors.WARNING} [Test payload]: {bcolors.ENDC}{item['test_payload']}\n"
         )
-        # print(f"{bcolors.WARNING} Modified request example:{bcolors.ENDC}")
-        # print(json.dumps(item["modified_request_example"], indent=2))
+        print(f"{bcolors.WARNING} Modified request example:{bcolors.ENDC}")
+        print(json.dumps(item["modified_request_example"], indent=2))
         print("=" * 100 + "\n")
 
 
@@ -81,7 +81,6 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         "Crucial Instructions:\n"
         "-   Anti-duplication: If a vulnerability could fit under multiple controls, assign it only ONCE to the MOST SPECIFIC control that best describes the root cause.\n"
         "-   No repeated vulnerabilities: Do not report the same vulnerability multiple times, even if it appears in different requests. Each unique possible vulnerability should be reported only once.\n"
-        "-   Prioritize by Impact: Focus on tests that, if successful, would have a significant security or financial impact, and order the output by this priority-based list.\n"
         "-   Be proactive: Just because a parameter looks encrypted it does not mean it is secure. Suggest tests to validate the strength of the protection.\n\n"
         "-   No assumptions: Do not assume that every potential vulnerability found is actually vulnerable. You should articulate your words in a manner that explains the possible vulnerability, but do not assume it. Only assume it if it is clearly vulnerable from the packet provided and no more analysis or action is required.\n\n"
         "-   Parameter specificity: For parameters in nested structures (e.g., 'quantity' in a JSON object/key like 'data'), specify the exact field name (e.g., 'quantity') as 'parameter_name', not the container ('data'). The 'test_payload' must be the value for that field (e.g., '-1').\n"
@@ -106,7 +105,8 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         "- Preserve ALL other headers and body content exactly as in the original request\n"
         "- If the modified data is in the body parameters, provide ONLY the changed parameter value, not the entire body\n"
         "- If the modified data is in the header parameters, provide ONLY the changed header value\n"
-        "Your final and only output must be a single, well-formed JSON array of these objects, and nothing else. Do not include any introductory text or explanations outside of the JSON structure."
+        "- If the modified data is an encoded value such as base64 or deflate, ensure that what you have modified and encoded is correct (no extra or added bad characters) and follows the original data stucture\n"
+        "Your final and only output must be a single, well-formed JSON array of these objects, and nothing else. Do not include any introductory text or explanations outside of the JSON structure, nor formatting style/markdown. Only a JSON object with the array of objects as described above.\n"
     )
 
     # 3. User prompt con el array JSON
@@ -195,9 +195,7 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
     try:
         result = json.loads(last_raw_response)
     except json.JSONDecodeError:
-        print(
-            f"{bcolors.FAIL}[ERROR]: Error parsing JSON from AI response{bcolors.ENDC}"
-        )
+        spinner.stop()
         return last_raw_response, None
 
     if not streaming and not show_think:

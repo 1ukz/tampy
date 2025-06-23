@@ -3,7 +3,7 @@ import sys
 import time
 import json
 import urllib.parse
-from phases.replay_flow import replay_actions_with_tamper
+from phases.phase4_replay_flow import replay_actions_with_tamper
 from resources.bcolors import bcolors
 from resources.yes_no_menu import yes_no_menu
 
@@ -12,8 +12,7 @@ def replace_domain(data, actual_domain):
     """Recursively replace PRIVATE_DOMAIN.com in all string values."""
     if isinstance(data, str):
         # replace both with and without www.
-        data = re.sub(r"\bPRIVATE_DOMAIN\.com\b", actual_domain, data)
-        data = re.sub(r"\bwww\.PRIVATE_DOMAIN\.com\b", actual_domain, data)
+        data = re.sub(r"\b(?:www\.)?PRIVATE_DOMAIN\.com\b", actual_domain, data)
         return data
     elif isinstance(data, dict):
         return {k: replace_domain(v, actual_domain) for k, v in data.items()}
@@ -22,7 +21,7 @@ def replace_domain(data, actual_domain):
     return data
 
 
-def edit_packet(har_filtered, url_input, json_result, actions_file):
+def edit_packet(har_filtered, url_input, json_result, actions_file, debug):
     print(f"{bcolors.OKBLUE}[INFO]: Available entries:{bcolors.ENDC}")
     actual_domain = urllib.parse.urlparse(url_input).netloc
 
@@ -51,7 +50,7 @@ def edit_packet(har_filtered, url_input, json_result, actions_file):
 
             print(f"{bcolors.FAIL}[ERROR]: Invalid selection!{bcolors.ENDC}")
             print(
-                f"{bcolors.BOLD} Valid list indices: 0-{len(json_result) - 1}{bcolors.ENDC}"
+                f"{bcolors.WARNING} Valid list indices: 0-{len(json_result) - 1}{bcolors.ENDC}"
             )
 
         # Get selected entry
@@ -71,16 +70,17 @@ def edit_packet(har_filtered, url_input, json_result, actions_file):
             "param_value": entry["test_payload"],
         }
 
-        # Debug output
-        print(f"{bcolors.OKBLUE}[DEBUG] Tamper config includes:")
-        print(f"  URL: {tamper_config['url_pattern']}")
-        print(f"  Method: {tamper_config['method']}")
-        print(
-            f"  Parameter: {tamper_config['param_name']} ({tamper_config['param_location']})"
-        )
-        print(f"  New value: {tamper_config['param_value']}")
-        print(bcolors.ENDC)
-        sys.stdout.flush()
+        # [Existing debug printing code remains unchanged]
+        if debug:
+            print(f"{bcolors.OKBLUE}[DEBUG]: Tamper config includes:")
+            print(f"  URL: {tamper_config['url_pattern']}")
+            print(f"  Method: {tamper_config['method']}")
+            print(
+                f"  Parameter: {tamper_config['param_name']} ({tamper_config['param_location']})"
+            )
+            print(f"  New value: {tamper_config['param_value']}")
+            print(bcolors.ENDC)
+            sys.stdout.flush()
 
         print(
             f"{bcolors.OKBLUE}[INFO]: Selected request:\n {bcolors.ENDC}",
@@ -92,28 +92,16 @@ def edit_packet(har_filtered, url_input, json_result, actions_file):
             f"{bcolors.BOLD}Send this modified request packet as it is? (y/n): {bcolors.ENDC}"
         ):
             while True:
-                # Simple one-field edit
-                field = input(
-                    f"{bcolors.BOLD}Enter field to change (e.g., headers.User-Agent or body): {bcolors.ENDC}"
-                ).strip()
+                print(
+                    f"{bcolors.BOLD}{bcolors.WARNING}Current param_value: {tamper_config['param_value']}{bcolors.ENDC}"
+                )
                 newval = input(
-                    f"{bcolors.BOLD}Enter new value for {field}: {bcolors.ENDC}"
+                    f"{bcolors.BOLD}Enter new value for param_value (or leave blank to keep current): {bcolors.ENDC}"
                 ).strip()
-
-                # Update tamper config
-                parts = field.split(".")
-                current = tamper_config["tampered_data"]
-                for p in parts[:-1]:
-                    if p not in current:
-                        current[p] = {}
-                    current = current[p]
-                current[parts[-1]] = newval
-
-                print(f"{bcolors.OKBLUE}[INFO]: Modified tamper config: {bcolors.ENDC}")
-                print(json.dumps(tamper_config, indent=2))
-
-                if not yes_no_menu(
-                    f"{bcolors.BOLD}Edit another field? (y/n): {bcolors.ENDC}"
+                if newval:
+                    tamper_config["param_value"] = newval
+                if yes_no_menu(
+                    f"{bcolors.BOLD}Do you confirm the new value for param_value? (y/n): {bcolors.ENDC}"
                 ):
                     break
 
@@ -121,7 +109,11 @@ def edit_packet(har_filtered, url_input, json_result, actions_file):
             f"{bcolors.OKBLUE}[INFO]: Replaying flow with packet tampering...{bcolors.ENDC}"
         )
         try:
-            replay_actions_with_tamper(actions_file, [tamper_config])
+            replay_actions_with_tamper(actions_file, [tamper_config], debug)
+        except KeyboardInterrupt:
+            print(
+                f"{bcolors.BOLD}{bcolors.WARNING}[WARNING]: Replay interrupted by user.{bcolors.ENDC}"
+            )
         except Exception as e:
             print(
                 f"{bcolors.BOLD}{bcolors.FAIL}[ERROR]: Replay failed: {str(e)}{bcolors.ENDC}"

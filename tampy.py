@@ -1,6 +1,6 @@
 import json
 import warnings
-from phases.har_parser import parse_har
+from phases.phase2_har_parser import parse_har
 from resources.animate_title import animate_title
 from resources.control_refs import control_references
 
@@ -15,7 +15,7 @@ import urllib.parse  # noqa: E402
 import argparse  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 from halo import Halo  # noqa: E402
-from phases.webtech_rec import (  # noqa: E402
+from phases.phase1_webtech_rec import (  # noqa: E402
     scan_url,
     check_ecommerce_platforms,
     get_pretty_output,
@@ -24,9 +24,9 @@ from phases.webtech_rec import (  # noqa: E402
     verify_website_exists,
     parse_existing_file_for_ecommerce,
 )
-from phases.session_recorder_pw import record_user_session as record_user_session_pw  # noqa: E402
-from phases.ai_analyzer import analyze_packets_with_ai, print_ai_answer  # noqa: E402
-from phases.control_testing import edit_packet  # noqa: E402
+from phases.phase2_session_recorder_pw import record_user_session as record_user_session_pw  # noqa: E402
+from phases.phase3_ai_analyzer import analyze_packets_with_ai, print_ai_answer  # noqa: E402
+from phases.phase4_control_testing import edit_packet  # noqa: E402
 from resources.bcolors import bcolors  # noqa: E402
 from resources.yes_no_menu import yes_no_menu  # noqa: E402
 
@@ -110,6 +110,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
                     f"{bcolors.FAIL}[ERROR]: Existing files could not be saved correctly. Unable to proceed with the analysis.{bcolors.ENDC}"
                 )
                 return None
+
             return har_filename_filtered, actions_file
 
     # 1) Record user session with Playwright
@@ -120,7 +121,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
     # Check if we got valid paths
     if not har_filename_raw or not actions_file:
         print(f"{bcolors.FAIL}[ERROR]: Session recording failed.{bcolors.ENDC}")
-        return None, None, None
+        return None, None
 
     if debug:
         print(f"{bcolors.OKCYAN}")
@@ -139,7 +140,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
         print(
             f"{bcolors.FAIL}[ERROR]: Packets could not be filtered. Unable to proceed with the analysis.{bcolors.ENDC}"
         )
-        return None, None, None
+        return None, None
 
     return har_filename_filtered_anon, actions_file
 
@@ -187,7 +188,7 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
 
     if not result:
         print(
-            f"{bcolors.FAIL}[ERROR]: No AI results to display. Raw response:{bcolors.ENDC}\n"
+            f"{bcolors.FAIL}[ERROR]: No AI results to display. Please try again, or review the raw JSON response to insert it manually into {har_filename}\n. Raw response:{bcolors.ENDC}\n"
         )
         print(raw_result or f"{bcolors.FAIL}(no raw text captured){bcolors.ENDC}")
         return None
@@ -206,9 +207,9 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
     return result
 
 
-def phase_4(har_filtered, url_input, json_result, actions_file):
+def phase_4(har_filtered, url_input, json_result, actions_file, debug):
     print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 4]: CONTROL TESTING{bcolors.ENDC}")
-    edit_packet(har_filtered, url_input, json_result, actions_file)
+    edit_packet(har_filtered, url_input, json_result, actions_file, debug)
 
 
 def startup():
@@ -299,7 +300,9 @@ def main():
                         har_filename, actions_file = phase_2(
                             url_input, packets_dir, actions_path, debug
                         )
-                        phase_2_success = True
+                        if har_filename and actions_file:
+                            phase_2_success = True
+
                     except KeyboardInterrupt:
                         print(
                             f"{bcolors.OKBLUE}[INFO]: Recording stopped by user.{bcolors.ENDC}"
@@ -308,24 +311,25 @@ def main():
                             print(
                                 f"{bcolors.FAIL}[ERROR]: Recording was interrupted, no files saved.{bcolors.ENDC}"
                             )
-                        # Check if files were created
-                        har_file = os.path.join(packets_dir, f"{prefix}_packets.json")
-                        har_raw = os.path.join(packets_dir, f"{prefix}_raw_packets.har")
-                        actions_filename = os.path.join(
-                            actions_path, f"{prefix}_actions.py"
-                        )
-                        if (
-                            os.path.exists(har_file)
-                            and os.path.exists(har_raw)
-                            and os.path.exists(actions_filename)
-                        ):
-                            har_filename = har_file
-                            actions_file = actions_filename
-                            phase_2_success = True
                         else:
-                            print(
-                                f"{bcolors.FAIL}[ERROR]: Recording was interrupted, no files saved.{bcolors.ENDC}"
+                            # Check if files were created
+                            har_file = os.path.join(
+                                packets_dir, f"{prefix}_packets.json"
                             )
+                            har_raw = os.path.join(
+                                packets_dir, f"{prefix}_raw_packets.har"
+                            )
+                            actions_filename = os.path.join(
+                                actions_path, f"{prefix}_actions.py"
+                            )
+                            if (
+                                os.path.exists(har_file)
+                                and os.path.exists(har_raw)
+                                and os.path.exists(actions_filename)
+                            ):
+                                har_filename = har_file
+                                actions_file = actions_filename
+                                phase_2_success = True
 
                     if phase_2_success:
                         json_result = phase_3(
@@ -337,10 +341,16 @@ def main():
                             prefix,
                         )
                         if json_result:
-                            phase_4(har_filename, url_input, json_result, actions_file)
+                            phase_4(
+                                har_filename,
+                                url_input,
+                                json_result,
+                                actions_file,
+                                debug,
+                            )
                     else:
                         print(
-                            f"{bcolors.FAIL}[ERROR]: Phase 2 did not produce required files.{bcolors.ENDC}"
+                            f"{bcolors.FAIL}[ERROR]: Phase 2 did not produce the required files.{bcolors.ENDC}"
                         )
                 else:
                     print(
