@@ -15,7 +15,7 @@
   Scans a target URL for web technologies and flags common e-commerce platforms.
 
 - **Phase 2: User session recording**  
-  Records HTTP(S) traffic during manual browsing with Playwright codegen (actions + HAR) or Selenium-Wire.
+  Records HTTP(S) traffic during manual browsing with Playwright codegen (actions + HAR).
 
 - **Phase 3: AI-powered packet analysis**  
   Sends filtered HTTP packets to an LLM (local or remote) for vulnerability control suggestions.
@@ -42,7 +42,7 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/<YOUR_USERNAME>/tampy.git
+   git clone https://github.com/1ukz/tampy.git
    cd tampy
    ```
 
