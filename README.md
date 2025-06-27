@@ -37,8 +37,38 @@
   playwright install deps
   ```
 - LLM API manageable with OpenAI python client (e.g DeepSeek, ChatGPT or xAI API) or Local LLM model running in a server (e.g. LM Studio with deepseek-r1-0528-qwen3-8b)
+- You will need to install [Firefox](https://www.mozilla.org/en-US/firefox/windows/) and [geckodriver](https://github.com/mozilla/geckodriver/releases). Below are detailed steps for setting up geckodriver but you may use google/youtube for help.
+<details>
+<summary>Setting up geckodriver</summary>
 
-### Installation
+  #### Step 1: Download GeckoDriver
+1. Visit the official GeckoDriver releases page on GitHub:  
+   [https://github.com/mozilla/geckodriver/releases](https://github.com/mozilla/geckodriver/releases)
+2. Download the version compatible with your system:
+   - For Windows: `geckodriver-vX.XX.X-win64.zip`
+   - For macOS: `geckodriver-vX.XX.X-macos.tar.gz`
+   - For Linux: `geckodriver-vX.XX.X-linux64.tar.gz`
+3. Extract the downloaded file to a folder of your choice.
+
+#### Step 2: Add GeckoDriver to the System Path
+To ensure Selenium can locate the GeckoDriver executable:
+- **Windows**:
+  1. Move the `geckodriver.exe` to a directory (e.g., `C:\WebDrivers\`).
+  2. Add this directory to the system's PATH:
+     - Open **Environment Variables**.
+     - Under **System Variables**, find and select the `Path` variable, then click **Edit**.
+     - Click **New** and enter the directory path where `geckodriver.exe` is stored.
+     - Click **OK** to save.
+- **macOS/Linux**:
+  1. Move the `geckodriver` file to `/usr/local/bin/` or another directory in your PATH.
+  2. Use the following command in the terminal:
+     ```bash
+     sudo mv geckodriver /usr/local/bin/
+     ```
+     Ensure `/usr/local/bin/` is in your PATH.
+</details>
+
+## 💻 Installation
 
 1. **Clone the repository**
    ```bash
