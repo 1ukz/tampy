@@ -187,7 +187,12 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
     raw_result, result = analyze_packets_with_ai(
         har_filename, mode, streaming, show_think, spinner2
     )
-
+    if result == []:
+        print(
+            f"{bcolors.FAIL}[ERROR]: After a thorough review, no potential vulnerabilities in the provided requests could be identified.\n This could be due to the provided requests not containing any parameters that would be relevant to the e-commerce purchase flow and therefore, possible vulnerabilities cannot be identified. \nPlease review the HAR packets to verify they are relevant and correct.\nIf you believe this is an error, please try again or review the raw AI JSON response to insert it manually into {har_filename}.\n Raw AI response:{bcolors.ENDC}\n"
+        )
+        print(raw_result or f"{bcolors.FAIL}(no raw text captured){bcolors.ENDC}")
+        return None
     if not result:
         print(
             f"{bcolors.FAIL}[ERROR]: No AI results to display (error parsing the JSON answer). \nPlease try again, or review the raw JSON response to insert it manually into {har_filename}.\n Raw response:{bcolors.ENDC}\n"

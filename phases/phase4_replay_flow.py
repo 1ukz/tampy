@@ -9,7 +9,6 @@ from io import BytesIO
 from playwright.sync_api import sync_playwright
 from resources.bcolors import bcolors
 
-# --- Tampering Script ---
 
 PAUSE_SNIPPET = [
     "    # ---------------------\n",
@@ -120,10 +119,16 @@ def setup_tampering(context, tamper_configs, debug):
             body_method = config.get("body_method", "")
             overrides = {}
 
+            parsed_req_scheme = parsed_request.scheme
+            parsed_req_netloc = parsed_request.netloc
+            parsed_pattern_scheme = parsed_pattern.scheme
+            parsed_pattern_netloc = parsed_pattern.netloc
+            request_method = request.method
+
             # Match scheme, netloc, and method
             if (
-                request.method != config["method"]
-                or parsed_request.scheme != parsed_pattern.scheme
+                # request.method != config["method"]
+                parsed_request.scheme != parsed_pattern.scheme
                 or parsed_request.netloc != parsed_pattern.netloc
             ):
                 continue
@@ -163,11 +168,15 @@ def setup_tampering(context, tamper_configs, debug):
                             print(
                                 f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url} (Method: {request_body_method}{bcolors.ENDC})"
                             )
-                            print(f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}")
+                            print(
+                                f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}"
+                            )
                             parsed_body[param_name] = [new_value]
                             body = urllib.parse.urlencode(parsed_body, doseq=True)
                             overrides["post_data"] = body
-                            print(f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}")
+                            print(
+                                f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}"
+                            )
                             route.continue_(**overrides)
                             matched = True
                         else:
@@ -188,7 +197,9 @@ def setup_tampering(context, tamper_configs, debug):
                                         print(
                                             f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url} (Method: {request_body_method}){bcolors.ENDC}"
                                         )
-                                        print(f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}")
+                                        print(
+                                            f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}"
+                                        )
                                         decoded_value[param_name] = new_value
                                         modified_value = encode_value(
                                             decoded_value, encoding
@@ -198,7 +209,9 @@ def setup_tampering(context, tamper_configs, debug):
                                             parsed_body, doseq=True
                                         )
                                         overrides["post_data"] = body
-                                        print(f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}")
+                                        print(
+                                            f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}"
+                                        )
                                         route.continue_(**overrides)
                                         matched = True
                                         break
@@ -216,11 +229,15 @@ def setup_tampering(context, tamper_configs, debug):
                                 print(
                                     f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url} (Method: {request_body_method}{bcolors.ENDC})"
                                 )
-                                print(f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}")
+                                print(
+                                    f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}"
+                                )
                                 data[param_name] = new_value
                                 body = json.dumps(data)
                                 overrides["post_data"] = body
-                                print(f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}")
+                                print(
+                                    f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}"
+                                )
                                 route.continue_(**overrides)
                                 matched = True
                             else:
@@ -247,11 +264,15 @@ def setup_tampering(context, tamper_configs, debug):
                         print(
                             f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url}{bcolors.ENDC}"
                         )
-                        print(f"{bcolors.WARNING}  Original header {param_name}: {current_value}{bcolors.ENDC}")
+                        print(
+                            f"{bcolors.WARNING}  Original header {param_name}: {current_value}{bcolors.ENDC}"
+                        )
                         headers = {**request.headers}
                         headers[param_name] = new_value
                         overrides["headers"] = headers
-                        print(f"{bcolors.WARNING}  Modified header {param_name}: {new_value}{bcolors.ENDC}")
+                        print(
+                            f"{bcolors.WARNING}  Modified header {param_name}: {new_value}{bcolors.ENDC}"
+                        )
                         route.continue_(**overrides)
                         matched = True
                     else:
@@ -273,7 +294,9 @@ def setup_tampering(context, tamper_configs, debug):
                         print(
                             f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url}{bcolors.ENDC}"
                         )
-                        print(f"{bcolors.WARNING}  Original query: {parsed_request.query}{bcolors.ENDC}")
+                        print(
+                            f"{bcolors.WARNING}  Original query: {parsed_request.query}{bcolors.ENDC}"
+                        )
                         query_dict[param_name] = [new_value]
                         new_query = urllib.parse.urlencode(query_dict, doseq=True)
                         new_url = urllib.parse.urlunparse(
@@ -287,7 +310,9 @@ def setup_tampering(context, tamper_configs, debug):
                             )
                         )
                         overrides["url"] = new_url
-                        print(f"{bcolors.WARNING}  Modified query: {new_query}{bcolors.ENDC}")
+                        print(
+                            f"{bcolors.WARNING}  Modified query: {new_query}{bcolors.ENDC}"
+                        )
                         route.continue_(**overrides)
                         matched = True
                     else:
@@ -302,6 +327,7 @@ def setup_tampering(context, tamper_configs, debug):
                     )
 
             elif param_loc == "url_path":
+                print("\n\nentering url_path tampering...")
                 # Normalize paths by removing trailing slashes
                 pattern_path = parsed_pattern.path.rstrip("/")
                 request_path = parsed_request.path.rstrip("/")

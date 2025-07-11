@@ -83,10 +83,10 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         "-   No repeated vulnerabilities: Do not report the same vulnerability multiple times, even if it appears in different requests. Each unique possible vulnerability should be reported only once.\n"
         "-   Be proactive: Just because a parameter looks encrypted it does not mean it is secure. Suggest tests to validate the strength of the protection.\n\n"
         "-   No assumptions: Do not assume that every potential vulnerability found is actually vulnerable. You should articulate your words in a manner that explains the possible vulnerability, but do not assume it. Only assume it if it is clearly vulnerable from the packet provided and no more analysis or action is required.\n\n"
-        "-   Parameter specificity: For parameters in nested structures (e.g., 'quantity' in a JSON object/key like 'data'), specify the exact field name (e.g., 'quantity') as 'parameter_name', not the container ('data'). The 'test_payload' must be the value for that field (e.g., '-1').\n"
+        "-   Parameter specificity: For parameters in nested structures (e.g., 'quantity' in a JSON object/key like 'data'), specify the exact field name (e.g., 'quantity') as 'parameter_name', not the container ('data'). The parameter_name should be exactly the one that appears, do not make it up. The 'test_payload' must be the value for that field (e.g., '-1').\n"
         "-   Modified request: In 'modified_request_example', change only the specific parameter value. For nested JSON in form data (e.g., 'application/x-www-form-urlencoded') or JSON bodies, update only the targeted field, preserving other fields. Ensure the body format matches the original content type.\n"
         "-   Content type handling: Support all common content types (e.g., 'application/json', 'application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain').\n"
-        "-   Parameter locations: Handle 'url_path', 'query', 'headers', and 'body' consistently. For 'url_path', identify dynamic segments (e.g., '/resource/{id}').\n\n"
+        "-   Parameter locations: Handle 'url_path', 'query', 'headers', and 'body' consistently. For 'url_path', identify dynamic segments (e.g., '/resource/{id}') and return in the parameter_name the index position starting from 0 of the segment (e.g., /user/{param}/cart, this should be ). The parameter_location should be exactly the one that appears, do not make it up.\n\n"
         "For each identified potential vulnerability, generate exactly ONE JSON object with the following fields. You must ensure each JSON object references one particular and specific parameter/value to test:\n"
         "   -   'control_id': (String) The corresponding control ID (e.g., \"2.1.4\").\n"
         "   -   'packet_index': (Integer) The 0-based index of the vulnerable request in the input array.\n"
@@ -107,6 +107,7 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         "- If the modified data is in the header parameters, provide ONLY the changed header value\n"
         "- If the modified data is an encoded value such as base64 or deflate, ensure that what you have modified and encoded is correct (no extra or added bad characters) and follows the original data stucture\n"
         "Your final and only output must be a single, well-formed JSON array of these objects, and nothing else. Do not include any introductory text or explanations outside of the JSON structure, nor formatting style/markdown. Only a JSON object with the array of objects as described above.\n"
+        "In case of no vulnerabilities found, return an empty JSON array: []\n"
     )
 
     # 3. User prompt con el array JSON
