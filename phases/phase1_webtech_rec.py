@@ -12,7 +12,11 @@ def url_menu(url_skip_prompt, another_url):
     )
     url_input = ""
 
-    if url_skip_prompt is not None and another_url is False or url_skip_prompt == "https://127.0.0.1:5000/":
+    if (
+        url_skip_prompt is not None
+        and another_url is False
+        or url_skip_prompt == "https://127.0.0.1:5000/"
+    ):
         url_input = url_skip_prompt.strip()
         print(
             f"{bcolors.BOLD}{bcolors.OKGREEN} Using the provided URL: {url_input} {bcolors.ENDC}"
@@ -68,10 +72,12 @@ def verify_website_exists(url):
         response.raise_for_status()
         return True
     except requests.exceptions.HTTPError as e:
-        # print(f"{bcolors.BOLD}{bcolors.FAIL}Connection [ERROR]: : {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}")
+        print(
+            f"{bcolors.BOLD}{bcolors.FAIL}Connection [ERROR]: : {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}"
+        )
         return False
     except Exception as e:
-        # print(f"{bcolors.BOLD}{bcolors.FAIL}Connection [ERROR]: : {e}{bcolors.ENDC}")
+        print(f"{bcolors.BOLD}{bcolors.FAIL}Connection [ERROR]: : {e}{bcolors.ENDC}")
         return False
 
 
