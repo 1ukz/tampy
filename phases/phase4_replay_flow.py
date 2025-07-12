@@ -119,16 +119,10 @@ def setup_tampering(context, tamper_configs, debug):
             body_method = config.get("body_method", "")
             overrides = {}
 
-            parsed_req_scheme = parsed_request.scheme
-            parsed_req_netloc = parsed_request.netloc
-            parsed_pattern_scheme = parsed_pattern.scheme
-            parsed_pattern_netloc = parsed_pattern.netloc
-            request_method = request.method
-
             # Match scheme, netloc, and method
             if (
-                # request.method != config["method"]
-                parsed_request.scheme != parsed_pattern.scheme
+                request.method != config["method"]
+                or parsed_request.scheme != parsed_pattern.scheme
                 or parsed_request.netloc != parsed_pattern.netloc
             ):
                 continue
@@ -136,16 +130,6 @@ def setup_tampering(context, tamper_configs, debug):
             # Handle different parameter locations with appropriate matching
             if param_loc in ["body", "headers", "query"]:
                 if parsed_request.path != parsed_pattern.path:
-                    continue
-            elif param_loc == "url_path":
-                pattern_path_segments = parsed_pattern.path.split("/")
-                if len(pattern_path_segments) <= 1:
-                    debugLog(
-                        f"[DEBUG]: URL path too short to tamper: {request.url}", debug
-                    )
-                    continue
-                base_path = "/".join(pattern_path_segments[:-1]) + "/"
-                if not parsed_request.path.startswith(base_path):
                     continue
 
             # Proceed with tampering based on location
@@ -166,7 +150,7 @@ def setup_tampering(context, tamper_configs, debug):
                         current_value = parsed_body[param_name][0]
                         if current_value != new_value:
                             print(
-                                f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url} (Method: {request_body_method}{bcolors.ENDC})"
+                                f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url} (Method: {request_body_method}){bcolors.ENDC}"
                             )
                             print(
                                 f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}"
@@ -327,7 +311,6 @@ def setup_tampering(context, tamper_configs, debug):
                     )
 
             elif param_loc == "url_path":
-                print("\n\nentering url_path tampering...")
                 # Normalize paths by removing trailing slashes
                 pattern_path = parsed_pattern.path.rstrip("/")
                 request_path = parsed_request.path.rstrip("/")
@@ -337,11 +320,12 @@ def setup_tampering(context, tamper_configs, debug):
                 request_segments = request_path.split("/")
 
                 # Find the position of the parameter in the pattern
+                param_position = int(param_name)
                 try:
-                    param_position = pattern_segments.index(f"{{{param_name}}}")
+                    param_val = pattern_segments[param_position]
                 except ValueError:
                     debugLog(
-                        f"[DEBUG]: Parameter {param_name} not found in pattern path",
+                        f"[DEBUG]: Parameter position {param_name} not found in pattern path",
                         debug,
                     )
                     continue
