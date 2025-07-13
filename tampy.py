@@ -231,8 +231,8 @@ def startup():
 
     webtechs_dir = os.path.join(logs_dir, "webtechs")
     packets_dir = os.path.join(logs_dir, "packets")
-    actions_dir = os.path.join("actions")
-    analysis_dir = os.path.join("analysis")
+    actions_dir = os.path.join(logs_dir, "actions")
+    analysis_dir = os.path.join(logs_dir, "analysis")
 
     for d in (webtechs_dir, packets_dir, actions_dir, analysis_dir):
         os.makedirs(d, exist_ok=True)
