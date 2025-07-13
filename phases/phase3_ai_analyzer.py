@@ -100,7 +100,7 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         "        * 'method': (String) HTTP method\n"
         "        * 'headers': (Object) Key-value pairs of headers\n"
         "        * 'body_data': (String) Request body if applicable\n"
-        "Crucial instructions for the modified request:\n"
+        "Crucial instructions for the modified request:\n" 
         "- When providing 'modified_request_example', ONLY change the specific parameter being tested, and it should always be ONLY one.\n"
         "- Preserve ALL other headers and body content exactly as in the original request\n"
         "- If the modified data is in the body parameters, provide ONLY the changed parameter value, not the entire body\n"
