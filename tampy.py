@@ -228,14 +228,15 @@ def startup():
 
     logs_dir = ".logs"
     os.makedirs(logs_dir, exist_ok=True)
-    webtechs_dir = r".logs\webtechs"
-    os.makedirs(webtechs_dir, exist_ok=True)
-    packets_dir = r".logs\packets"
-    os.makedirs(packets_dir, exist_ok=True)
-    actions_dir = r".logs\actions"
-    os.makedirs(actions_dir, exist_ok=True)
-    analysis_dir = r".logs\analysis"
-    os.makedirs(analysis_dir, exist_ok=True)
+
+    webtechs_dir = os.path.join(logs_dir, "webtechs")
+    packets_dir = os.path.join(logs_dir, "packets")
+    actions_dir = os.path.join("actions")
+    analysis_dir = os.path.join("analysis")
+
+    for d in (webtechs_dir, packets_dir, actions_dir, analysis_dir):
+        os.makedirs(d, exist_ok=True)
+
     return logs_dir, webtechs_dir, packets_dir, actions_dir, analysis_dir
 
 
