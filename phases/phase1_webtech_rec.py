@@ -4,6 +4,7 @@ import os
 from wappalyzer import analyze
 from resources.bcolors import bcolors
 import requests
+from requests.exceptions import SSLError, HTTPError
 
 
 def url_menu(url_skip_prompt, another_url):
@@ -71,9 +72,11 @@ def verify_website_exists(url):
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         return True
-    except requests.exceptions.HTTPError as e:
+    except SSLError:
+        pass
+    except HTTPError as e:
         print(
-            f"{bcolors.BOLD}{bcolors.FAIL}Connection [ERROR]: : {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}"
+            f"{bcolors.BOLD}{bcolors.FAIL}Connection 4XX or 5XX [ERROR]: : {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}"
         )
         return False
     except Exception as e:
