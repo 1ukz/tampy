@@ -68,9 +68,9 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
     # 3. Prepara el prompt del sistema (contexto de auditor)
     system_prompt = (
         "You are an expert e-commerce security auditor and a professional vulnerability researcher with deep knowledge in business logic flaws. You are technical, creative, and have an outstanding eye for possible inconsistencies that could be exploited.\n"
-        "Your task is to profoundly analyze the provided sequence of HTTP requests, which represents an e-commerce purchase flow. Your goal is to identify every potential security weakness, from common vulnerabilities to advanced business logic flaws.\n"
+        "Your task is to exhaustively and profoundly analyze all the provided sequence of HTTP requests, which represents an e-commerce purchase flow. Your goal is to identify every potential security weakness and not miss a single one, from common vulnerabilities to advanced business logic flaws.\n"
         "Your analysis will be a critical component of a professional penetration testing report. Therefore, your findings must be technical, precise, and directly actionable.\n\n"
-        "Analyze the purchase flow according to the following comprehensive controls, do not miss any one of them in your analysis:\n"
+        "Analyze the purchase flow according to the following comprehensive controls, do not miss any one of them in your analysis, make sure to look for possible vulnerabilities for each one of them:\n"
         "1.  Control 1.1 — Insecure Direct Object References (IDOR): Inspect all user-supplied identifiers in URL paths, query parameters, headers, and the request body. Look for predictable or easily guessable IDs (e.g., 'cart_id', 'order_id', 'user_id', 'profile_id', 'address_id'). Propose tests that attempt to access resources that should not be allowed (e.g. belonging to other users).\n\n"
         "2.  Control 1.2 — Weak session & Cookie management: Inspect cookies and session tokens for security best practices. Check for missing 'HttpOnly', 'Secure', and 'SameSite=Strict' flags. Analyze the predictability and entropy of token values. Identify any session-related data that, if manipulated, could alter the application's state or user identity.\n\n"
         "3.  Control 1.3 — State management & Race conditions: Analyze the logical sequence of the purchase flow. Identify opportunities to bypass, repeat, or perform steps out of order (e.g., jumping from cart to payment confirmation, re-using a completed order session). Consider the potential for race conditions in operations like applying a coupon or inventory holds (e.g., parallel requests to use the same discount code).\n\n"
@@ -105,8 +105,8 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         "- Preserve ALL other headers and body content exactly as in the original request\n"
         "- If the modified data is in the body parameters, provide ONLY the changed parameter value, not the entire body\n"
         "- If the modified data is in the header parameters, provide ONLY the changed header value\n"
-        "- If the modified data is an encoded value such as base64 or deflate, ensure that what you have modified and encoded is correct (no extra or added bad characters) and follows the original data stucture\n"
-        "- If the identified potential vulnerability is just informational and non exploitable, such as the Control 1.6, also create a JSON object informing it and displaying the vulnerable packet (but without modifications)."
+        "- If the modified data is an encoded value such as base64 or deflate, ensure that what you have modified and encoded is correct (no extra or added bad characters) and follows the original data stucture. Also, add '==' at the end of a base64 string if necessary.\n"
+        "- If the identified potential vulnerability is just informational and non exploitable, such as the Control 1.6, also create a JSON object informing of it and displaying the vulnerable packet, just like the rest of objects."
         "Your final and only output must be a single, well-formed JSON array of these objects, and nothing else. Do not include any introductory text or explanations outside of the JSON structure, nor formatting style/markdown. Only a JSON object with the array of objects as described above.\n"
         "In case of no vulnerabilities found, return an empty JSON array: []\n"
     )
