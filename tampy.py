@@ -1,6 +1,6 @@
 import json
 import warnings
-from phases.phase2_har_parser import parse_har
+from phases.phase2_har_parser import parse_har, redact_filtered
 from resources.animate_title import animate_title
 from resources.control_refs import control_references
 
@@ -17,6 +17,7 @@ from dotenv import load_dotenv  # noqa: E402
 from halo import Halo  # noqa: E402
 from phases.phase1_webtech_rec import (  # noqa: E402
     scan_url,
+    ScanError,
     check_ecommerce_platforms,
     get_pretty_output,
     save_results_to_file,
@@ -60,9 +61,23 @@ def phase_1(url_input, webtechs_dir):
         text="Scanning web technologies... Please wait patiently.", spinner="dots"
     )
     spinner.start()
-    results = scan_url(url_input, spinner)
+    try:
+        results = scan_url(url_input, spinner)
+    except ScanError:
+        # Enumeration failed (network/library issue), which is NOT the same as
+        # detecting an e-commerce platform. Warn and continue the assessment.
+        print(
+            f"{bcolors.WARNING}[WARNING]: Skipping platform detection and "
+            f"continuing with the assessment.{bcolors.ENDC}"
+        )
+        return False, prefix
+
     if not results:
-        return True, prefix
+        print(
+            f"{bcolors.WARNING}[WARNING]: Enumeration returned no technologies; "
+            f"continuing with the assessment.{bcolors.ENDC}"
+        )
+        return False, prefix
 
     platforms_found, ecommerce_found = check_ecommerce_platforms(results, spinner)
     pretty = get_pretty_output(results, platforms_found, items_per_row=3)
@@ -87,6 +102,8 @@ def phase_2(url_input, packets_dir, actions_path, debug):
 
     har_file = os.path.join(packets_dir, f"{prefix}_packets.json")
     har_raw = os.path.join(packets_dir, f"{prefix}_raw_packets.har")
+    redacted_file = os.path.join(packets_dir, f"{prefix}_packets_redacted.json")
+    map_file = os.path.join(packets_dir, f"{prefix}_packets_secretmap.json")
     actions_filename = os.path.join(actions_path, f"{prefix}_actions.py")
     # Check if HAR and actions files already exist
     if (
@@ -101,19 +118,21 @@ def phase_2(url_input, packets_dir, actions_path, debug):
             f"{bcolors.BOLD}Do you want to use the existing HAR and actions files and skip recording? (y/n): {bcolors.ENDC}"
         ):
             print(
-                f"{bcolors.OKBLUE}[INFO]: Using existing files: {har_file}, {har_raw}, {actions_filename}{bcolors.ENDC}"
+                f"{bcolors.OKBLUE}[INFO]: Using existing files: {har_file}, {actions_filename}{bcolors.ENDC}"
             )
-            har_filename_filtered = har_file
-            har_filename_raw = har_raw
             actions_file = actions_filename
+            # Re-run redaction if the redacted file/map are missing (e.g. logs
+            # produced by an older TAMPY version).
+            if not (os.path.exists(redacted_file) and os.path.exists(map_file)):
+                redacted_file, map_file = redact_filtered(har_file, domain)
 
-            if not har_filename_filtered or not har_filename_raw or not actions_file:
+            if not redacted_file or not actions_file or not map_file:
                 print(
-                    f"{bcolors.FAIL}[ERROR]: Existing files could not be saved correctly. Unable to proceed with the analysis.{bcolors.ENDC}"
+                    f"{bcolors.FAIL}[ERROR]: Existing files could not be prepared correctly. Unable to proceed with the analysis.{bcolors.ENDC}"
                 )
-                return None
+                return None, None, None
 
-            return har_filename_filtered, actions_file
+            return redacted_file, actions_file, map_file
 
     # 1) Record user session with Playwright
     har_filename_raw, actions_file = record_user_session_pw(
@@ -123,7 +142,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
     # Check if we got valid paths
     if not har_filename_raw or not actions_file:
         print(f"{bcolors.FAIL}[ERROR]: Session recording failed.{bcolors.ENDC}")
-        return None, None
+        return None, None, None
 
     if debug:
         print(f"{bcolors.OKCYAN}")
@@ -132,19 +151,20 @@ def phase_2(url_input, packets_dir, actions_path, debug):
         print(f"[DEBUG] dir listing of packets_dir: {os.listdir(packets_dir)}")
         print(f"{bcolors.ENDC}")
 
-    # 2) Parse and filter HAR into JSON
+    # 2) Parse, filter and redact HAR into JSON
+    har_filename_filtered = redacted = secret_map = None
     if har_filename_raw and actions_file:
-        har_filename_filtered, har_filename_filtered_anon = parse_har(
+        har_filename_filtered, redacted, secret_map = parse_har(
             har_filename_raw, har_file, domain
         )
 
-    if not har_filename_filtered or not har_filename_filtered_anon:
+    if not har_filename_filtered or not redacted or not secret_map:
         print(
-            f"{bcolors.FAIL}[ERROR]: Packets could not be filtered. Unable to proceed with the analysis.{bcolors.ENDC}"
+            f"{bcolors.FAIL}[ERROR]: Packets could not be filtered/redacted. Unable to proceed with the analysis.{bcolors.ENDC}"
         )
-        return None, None
+        return None, None, None
 
-    return har_filename_filtered_anon, actions_file
+    return redacted, actions_file, secret_map
 
 
 def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
@@ -174,7 +194,10 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
             )
             time.sleep(0.5)
             with open(analysis_filename, "r", encoding="utf-8") as f:
-                result = json.load(f)
+                cached = json.load(f)
+            from core.models import parse_findings
+
+            result = parse_findings(cached)
             print_ai_answer(result)
             return result
     spinner2 = Halo(
@@ -206,17 +229,21 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
     print_ai_answer(result)
 
     with open(analysis_filename, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+        serialisable = [
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+            for item in result
+        ]
+        json.dump(serialisable, f, indent=2)
     print(
-        f"{bcolors.OKBLUE}[INFO]: Analysis results saved to: {har_filename}{bcolors.ENDC}"
+        f"{bcolors.OKBLUE}[INFO]: Analysis results saved to: {analysis_filename}{bcolors.ENDC}"
     )
 
     return result
 
 
-def phase_4(url_input, json_result, actions_file, debug):
+def phase_4(url_input, json_result, actions_file, map_file, debug):
     print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 4]: CONTROL TESTING{bcolors.ENDC}")
-    edit_packet(url_input, json_result, actions_file, debug)
+    edit_packet(url_input, json_result, actions_file, map_file, debug)
 
 
 def startup():
@@ -304,11 +331,12 @@ def main():
                     phase_2_success = False
                     har_filename = None
                     actions_file = None
+                    map_file = None
                     try:
-                        har_filename, actions_file = phase_2(
+                        har_filename, actions_file, map_file = phase_2(
                             url_input, packets_dir, actions_path, debug
                         )
-                        if har_filename and actions_file:
+                        if har_filename and actions_file and map_file:
                             phase_2_success = True
 
                     except KeyboardInterrupt:
@@ -335,9 +363,19 @@ def main():
                                 and os.path.exists(har_raw)
                                 and os.path.exists(actions_filename)
                             ):
-                                har_filename = har_file
+                                # Must redact before anything reaches the LLM,
+                                # even on the interrupt-recovery path.
+                                parsed = urllib.parse.urlparse(url_input)
+                                dom = parsed.netloc.lower()
+                                if dom.startswith("www."):
+                                    dom = dom[4:]
+                                redacted_file, map_file = redact_filtered(
+                                    har_file, dom
+                                )
                                 actions_file = actions_filename
-                                phase_2_success = True
+                                if redacted_file and map_file:
+                                    har_filename = redacted_file
+                                    phase_2_success = True
 
                     if phase_2_success:
                         json_result = phase_3(
@@ -353,6 +391,7 @@ def main():
                                 url_input,
                                 json_result,
                                 actions_file,
+                                map_file,
                                 debug,
                             )
                     else:

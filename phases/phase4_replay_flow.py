@@ -379,6 +379,13 @@ def setup_tampering(context, tamper_configs, debug):
                     f"[DEBUG]: Path segment count mismatch for {request.url}", debug
                 )
 
+            # A route may only be resolved once. As soon as one config has
+            # handled (continued) this request, stop iterating the rest,
+            # otherwise a second route.continue_() raises "Route is already
+            # handled". (Latent bug: harmless with one config, fatal with many.)
+            if matched:
+                break
+
         if not matched:
             debugLog(f"[DEBUG]: Passing through: {request.method} {request.url}", debug)
             route.continue_()
@@ -386,9 +393,13 @@ def setup_tampering(context, tamper_configs, debug):
     context.route("**/*", master_handler)
 
 
-def post_process(path):
-    """Process recorded script to make it compatible with our replay system"""
-    source = path.read_text(encoding="utf-8")
+def _transform_source(source, pause):
+    """Turn a codegen script into a `run_actions(page)` module body.
+
+    Pure function (no file I/O) so it can target a sibling file instead of
+    mutating the original recording, and so the manual (paused) and automated
+    (headless, no pause) replays can share one code path.
+    """
     action_lines = []
     for line in source.splitlines():
         if (
@@ -416,14 +427,46 @@ def post_process(path):
         "def run_actions(page: Page):\n",
     ]
     new_source.extend(action_lines)
-    new_source.extend(PAUSE_SNIPPET)
-    path.write_text("\n".join(new_source), encoding="utf-8")
+    if pause:
+        new_source.extend(PAUSE_SNIPPET)
+    else:
+        # Automated runs must not block on input(); just end the function.
+        new_source.append("    return\n")
+    return "\n".join(new_source)
+
+
+def build_replay_module(actions_file, pause=True):
+    """Write a sibling ``*_replay.py`` module and return its path.
+
+    The original codegen recording is never mutated (the old ``post_process``
+    rewrote it in place, which broke re-runs), so the same recording can be
+    replayed any number of times.
+    """
+    src_path = Path(actions_file)
+    source = src_path.read_text(encoding="utf-8")
+    # If handed an already-transformed module, reuse its body verbatim.
+    if "def run_actions(" in source:
+        body = source
+        if not pause:
+            body = body.replace("    input()\n", "    return\n")
+    else:
+        body = _transform_source(source, pause)
+    out_path = src_path.with_name(src_path.stem + "_replay.py")
+    out_path.write_text(body, encoding="utf-8")
+    return out_path
+
+
+# Backwards-compatible alias (older callers used post_process in place).
+def post_process(path, pause=True):
+    path.write_text(
+        _transform_source(path.read_text(encoding="utf-8"), pause), encoding="utf-8"
+    )
 
 
 def load_actions_module(actions_file):
     """Dynamically load a Python module from a file path"""
     path = Path(actions_file)
-    module_name = path.stem
+    module_name = path.stem.replace(".", "_")
     spec = importlib.util.spec_from_file_location(module_name, str(path))
     if spec is None:
         raise ImportError(f"Could not load module from {actions_file}")
@@ -432,22 +475,27 @@ def load_actions_module(actions_file):
     return module
 
 
+def _prime_body_method(tamper_configs):
+    for config in tamper_configs:
+        if "modified_request_example" in config:
+            body_data = urllib.parse.parse_qs(
+                config["modified_request_example"].get("body_data", "")
+            )
+            config["body_method"] = body_data.get("Method", [""])[0]
+
+
 def replay_actions_with_tamper(actions_file, tamper_configs, debug):
-    actions_file_path = Path(actions_file)
-    post_process(actions_file_path)
-    module = load_actions_module(actions_file_path)
+    """Manual, headed replay (unchanged behaviour): shows the browser and
+    pauses at the end for the human to inspect the result."""
+    replay_module = build_replay_module(actions_file, pause=True)
+    module = load_actions_module(replay_module)
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
         context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 
-        for config in tamper_configs:
-            if "modified_request_example" in config:
-                body_data = urllib.parse.parse_qs(
-                    config["modified_request_example"].get("body_data", "")
-                )
-                config["body_method"] = body_data.get("Method", [""])[0]
+        _prime_body_method(tamper_configs)
 
         if tamper_configs:
             setup_tampering(context, tamper_configs, debug)
@@ -468,3 +516,71 @@ def replay_actions_with_tamper(actions_file, tamper_configs, debug):
 
         context.close()
         browser.close()
+
+
+def _make_response_capturer(target, debug):
+    """Return (listener, store) that records the response for the tampered
+    request, matched by path + method against the target config."""
+    import urllib.parse as _up
+
+    want_path = _up.urlparse(target["url_pattern"]).path.rstrip("/")
+    want_method = target["method"].upper()
+    store = {"response": None}
+
+    def on_response(response):
+        try:
+            req = response.request
+            if req.method.upper() != want_method:
+                return
+            if _up.urlparse(req.url).path.rstrip("/") != want_path:
+                return
+            try:
+                body = response.text()
+            except Exception:
+                body = ""
+            store["response"] = {
+                "url": req.url,
+                "status": response.status,
+                "headers": dict(response.headers),
+                "body": body,
+            }
+            debugLog(f"[DEBUG]: Captured response {response.status} for {req.url}", debug)
+        except Exception as e:
+            debugLog(f"[DEBUG]: response capture error: {e}", debug)
+
+    return on_response, store
+
+
+def run_replay_capture(actions_file, tamper_configs, target, debug=False, headless=True):
+    """Replay the flow once (optionally tampering) and capture the response for
+    ``target``. Returns the captured response dict or ``None``.
+
+    Used by the deterministic verifier: run once untampered for a baseline and
+    once tampered, then diff the two captured responses.
+    """
+    replay_module = build_replay_module(actions_file, pause=False)
+    module = load_actions_module(replay_module)
+    if not hasattr(module, "run_actions"):
+        raise RuntimeError("No run_actions function found in actions script")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=headless)
+        context = browser.new_context(ignore_https_errors=True)
+        page = context.new_page()
+
+        listener, store = _make_response_capturer(target, debug)
+        page.on("response", listener)
+
+        _prime_body_method(tamper_configs)
+        if tamper_configs:
+            setup_tampering(context, tamper_configs, debug)
+
+        try:
+            module.run_actions(page)
+        except Exception as e:
+            debugLog(f"[DEBUG]: capture replay failed: {e}", debug)
+        finally:
+            context.close()
+            browser.close()
+
+    return store["response"]

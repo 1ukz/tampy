@@ -1,52 +1,52 @@
 import json
-import re
 from resources.bcolors import bcolors
+from core.redaction import Redactor
 
-# ==== AI USE to generate an initial anonymization function and improve some sections in parser ====
 
+def redact_filtered(filtered_path, domain):
+    """Produce a redacted copy of the filtered packets plus a local secret map.
 
-def anonymize_har(har_path: str, domain: str):
+    Replaces the old ``anonymize_har`` (which only swapped the domain string and
+    left live cookies, tokens, emails and card numbers intact). Secrets are now
+    replaced with reversible placeholders before anything is sent to the LLM;
+    the placeholder->value map is written next to the redacted file and never
+    leaves the machine.
+
+    Returns (redacted_path, map_path) or (None, None) on failure.
+    """
     try:
-        replacement = "PRIVATE_DOMAIN.com"
-        output_path = har_path.replace(".har", f"_{replacement}.har")
+        redacted_path = filtered_path.replace(".json", "_redacted.json")
+        map_path = filtered_path.replace(".json", "_secretmap.json")
 
-        """
-        Load a HAR at har_path, replace all occurrences of `domain`
-        in any string value with `replacement`, and write it back
-        to output_path.
-        """
-        # compile once, for case‐insensitive replacement
-        pat = re.compile(re.escape(domain), re.IGNORECASE)
+        with open(filtered_path, "r", encoding="utf-8") as f:
+            packets = json.load(f)
 
-        def recurse(obj):
-            # walk the JSON tree
-            if isinstance(obj, dict):
-                return {k: recurse(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [recurse(item) for item in obj]
-            elif isinstance(obj, str):
-                # replace anywhere in the string
-                return pat.sub(replacement, obj)
-            else:
-                return obj
+        redactor = Redactor()
+        redacted = redactor.redact_packets(packets)
 
-        # load, transform, write
-        with open(har_path, "r", encoding="utf-8") as f:
-            har = json.load(f)
+        with open(redacted_path, "w", encoding="utf-8") as f:
+            json.dump(redacted, f, indent=2)
+        redactor.save_map(map_path)
 
-        har_anon = recurse(har)
-
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(har_anon, f, indent=2)
-
+        report = redactor.report()
+        total = sum(report.values())
+        if total:
+            summary = ", ".join(f"{k.lower()}={v}" for k, v in report.items())
+            print(
+                f"{bcolors.OKBLUE}[INFO]: Redacted {total} secret value(s) before "
+                f"LLM egress ({summary}).{bcolors.ENDC}"
+            )
+        else:
+            print(
+                f"{bcolors.OKBLUE}[INFO]: No secrets detected to redact.{bcolors.ENDC}"
+            )
         print(
-            f"{bcolors.OKBLUE}[INFO]: Anonymized HAR written to {output_path}.{bcolors.ENDC}"
+            f"{bcolors.OKBLUE}[INFO]: Redacted packets written to {redacted_path}.{bcolors.ENDC}"
         )
+        return redacted_path, map_path
     except Exception as e:
-        print(f"{bcolors.FAIL}[ERROR]: Failed to anonymize HAR: {e}{bcolors.ENDC}")
-        return None
-
-    return output_path
+        print(f"{bcolors.FAIL}[ERROR]: Failed to redact packets: {e}{bcolors.ENDC}")
+        return None, None
 
 
 def parse_har(har_path, filtered_path, domain):
@@ -134,10 +134,10 @@ def parse_har(har_path, filtered_path, domain):
         print(
             f"{bcolors.OKGREEN}[SUCCESS]: Filtered packets saved to: {filtered_path}{bcolors.ENDC}"
         )
-        anon_path = anonymize_har(filtered_path, domain)
+        redacted_path, map_path = redact_filtered(filtered_path, domain)
 
-        return filtered_path, anon_path
+        return filtered_path, redacted_path, map_path
 
     except Exception as e:
         print(f"{bcolors.FAIL}[ERROR]: Failed to parse HAR: {e}{bcolors.ENDC}")
-        return None, None
+        return None, None, None

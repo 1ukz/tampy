@@ -1,15 +1,23 @@
 import os
 import json
-from openai import OpenAI
 from resources.bcolors import bcolors
+from core.llm import build_client, messages_for, parse_response
+from core.models import Finding, parse_findings
 
 
 def print_ai_answer(result):
+    """Pretty-print findings. Accepts Finding models or legacy dicts."""
     for item in result:
+        if isinstance(item, Finding):
+            item = item.model_dump(mode="json")
+        loc = item.get("parameter_location")
+        loc = loc.value if hasattr(loc, "value") else loc
         print(
             f"\n{bcolors.UNDERLINE}{bcolors.BOLD}{bcolors.OKBLUE}Control:{bcolors.ENDC} {item['control_id']}"
         )
         print(f"{bcolors.WARNING} [Packet index]: {bcolors.ENDC}{item['packet_index']}")
+        if item.get("severity"):
+            print(f"{bcolors.WARNING} [Severity]: {bcolors.ENDC}{item.get('severity')}")
         print(
             f"\n{bcolors.WARNING} [Vuln. description]: {bcolors.ENDC}{item['vulnerability_description']}"
         )
@@ -17,9 +25,7 @@ def print_ai_answer(result):
             f"{bcolors.WARNING} [Exploitation hypothesis]: {bcolors.ENDC}{item['exploitation_hypothesis']}"
         )
         print(f"{bcolors.WARNING} [Parameter]: {bcolors.ENDC}{item['parameter_name']}")
-        print(
-            f"{bcolors.WARNING} [Parameter location]: {bcolors.ENDC}{item['parameter_location']}"
-        )
+        print(f"{bcolors.WARNING} [Parameter location]: {bcolors.ENDC}{loc}")
         print(
             f"{bcolors.WARNING} [Test payload]: {bcolors.ENDC}{item['test_payload']}\n"
         )
@@ -107,8 +113,10 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         "- If the modified data is in the header parameters, provide ONLY the changed header value\n"
         "- If the modified data is an encoded value such as base64 or deflate, ensure that what you have modified and encoded is correct (no extra or added bad characters) and follows the original data stucture. Also, add '==' at the end of a base64 string if necessary.\n"
         "- If the identified potential vulnerability is just informational and non exploitable, such as the Control 1.6, also create a JSON object informing of it and displaying the vulnerable packet, just like the rest of objects."
-        "Your final and only output must be a single, well-formed JSON array of these objects, and nothing else. Do not include any introductory text or explanations outside of the JSON structure, nor formatting style/markdown. Only a JSON object with the array of objects as described above.\n"
-        "In case of no vulnerabilities found, return an empty JSON array: []\n"
+        "   -   'severity': (String) One of 'info', 'low', 'medium', 'high', 'critical'.\n"
+        "   -   'confidence': (Number) Your confidence from 0.0 to 1.0 that this is genuinely exploitable.\n"
+        'Your final and only output must be a single, well-formed JSON object of the form {"findings": [ ... ]}, where the array holds the objects described above, and nothing else. Do not include any introductory text or explanations outside of the JSON structure, nor formatting style/markdown.\n'
+        'In case of no vulnerabilities found, return an empty array: {"findings": []}\n'
     )
 
     # 3. User prompt con el array JSON
@@ -119,27 +127,39 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         )  # compactar el JSON sin espacios despyes de comas y dos puntos
     )
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
-    client._client_timeout = 1200.0  # aumentar timeout a 20 minutos para evitar timeouts en respuestas largas
+    # build_client passes a timeout the SDK actually honours (the old
+    # client._client_timeout assignment was a silent no-op). Messages are laid
+    # out static-system-prompt-first so providers can cache the large prefix.
+    client = build_client(api_key, base_url)
+    messages = messages_for(system_prompt, user_prompt)
 
     raw_output = ""
     raw_reasoning_content = ""
     result = []
     try:
         if not streaming:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.2,
-            )
+            # Request a structured JSON object where supported; fall back
+            # gracefully for providers/models that reject response_format.
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.2,
+                    response_format={"type": "json_object"},
+                )
+            except Exception:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.2,
+                )
 
-            raw_reasoning_content = resp.choices[0].message.reasoning_content
+            raw_reasoning_content = getattr(
+                resp.choices[0].message, "reasoning_content", ""
+            )
             raw_output = resp.choices[0].message.content
 
-            if show_think:
+            if show_think and raw_reasoning_content:
                 spinner.stop()
                 print(raw_reasoning_content)
 
@@ -147,10 +167,7 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
             first_token = True
             stream_resp = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=messages,
                 temperature=0.2,
                 stream=True,
             )
@@ -194,12 +211,19 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         )
         return None, None
 
-    try:
-        result = json.loads(last_raw_response)
-    except json.JSONDecodeError:
-        spinner.stop()
-        return last_raw_response, None
-
     if not streaming and not show_think:
         spinner.stop()
-    return last_raw_response, result
+
+    # Structurally extract + schema-validate instead of a raw json.loads.
+    payload, findings = parse_response(last_raw_response)
+    if payload is None:
+        # Nothing JSON-shaped could be extracted: a genuine parse failure.
+        return last_raw_response, None
+    if not payload:
+        # Model explicitly returned an empty findings list: no vulns.
+        return last_raw_response, []
+    if not findings:
+        # JSON was present but no entry validated against the schema.
+        return last_raw_response, None
+
+    return last_raw_response, findings

@@ -6,6 +6,14 @@ from resources.bcolors import bcolors
 import requests
 from requests.exceptions import SSLError, HTTPError
 
+try:
+    # verify=False in verify_website_exists would otherwise spam warnings.
+    import urllib3
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+except Exception:
+    pass
+
 
 def url_menu(url_skip_prompt, another_url):
     print(
@@ -69,11 +77,18 @@ def verify_website_exists(url):
         "Accept": "*/*",
     }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        # verify=False: a self-signed/invalid cert is common on test targets and
+        # must not read as "site down". We only need to know the host answers.
+        response = requests.get(url, headers=headers, timeout=10, verify=False)
         response.raise_for_status()
         return True
     except SSLError:
-        pass
+        # Reached the server; only the TLS chain was unhappy. Treat as reachable.
+        print(
+            f"{bcolors.WARNING}[WARNING]: TLS certificate could not be verified for "
+            f"{url}; continuing (expected for test targets).{bcolors.ENDC}"
+        )
+        return True
     except HTTPError as e:
         print(
             f"{bcolors.BOLD}{bcolors.FAIL}Connection 4XX or 5XX [ERROR]: : {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}"
@@ -84,15 +99,22 @@ def verify_website_exists(url):
         return False
 
 
+class ScanError(Exception):
+    """Raised when technology enumeration fails (distinct from 'no e-commerce')."""
+
+
 def scan_url(url_input, spinner):
     try:
         results = analyze(url_input, scan_type="full")
         return results
     except Exception as e:
+        spinner.stop()
         print(
-            f"{bcolors.FAIL}An [ERROR]: Error occurred during analysis: {e}{bcolors.ENDC}"
+            f"{bcolors.FAIL}[ERROR]: Technology enumeration failed: {e}{bcolors.ENDC}"
         )
-        return None
+        # Signal failure distinctly so the caller does NOT treat it as
+        # "an e-commerce platform was found" and silently abort the run.
+        raise ScanError(str(e)) from e
 
 
 def check_ecommerce_platforms(results, spinner):
