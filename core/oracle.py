@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel
 
+from core.gateways import extract_charge_amounts
 from core.models import Finding, OracleResult, Verdict
 
 # Status codes that signal the server rejected the tampered input outright.
@@ -73,6 +74,7 @@ class ResponseSnapshot(BaseModel):
     status: Optional[int] = None
     headers: Dict[str, str] = {}
     body: str = ""
+    request_body: Optional[str] = None  # request payload, kept for gateway amounts
 
     def path(self) -> str:
         return urllib.parse.urlparse(self.url).path.rstrip("/")
@@ -204,6 +206,38 @@ def _monetary_changes(
     return changes
 
 
+def _gateway_amounts(responses: List[ResponseSnapshot]) -> Dict[str, Dict[str, Any]]:
+    """Map (gateway, field) -> amount info across a flow's gateway requests."""
+    found: Dict[str, Dict[str, Any]] = {}
+    for r in responses:
+        for amt in extract_charge_amounts(r.url, r.request_body):
+            key = f"{amt['gateway']}:{amt['field']}"
+            # Keep the last occurrence (closest to the final charge).
+            found[key] = amt
+    return found
+
+
+def _gateway_amount_change(
+    baseline: List[ResponseSnapshot], tampered: List[ResponseSnapshot]
+) -> Optional[Dict[str, Any]]:
+    """Detect a changed charge amount at a payment gateway between the runs."""
+    b_amts = _gateway_amounts(baseline)
+    t_amts = _gateway_amounts(tampered)
+    for key, t in t_amts.items():
+        b = b_amts.get(key)
+        if b is None:
+            continue
+        if abs(float(t["amount"]) - float(b["amount"])) > 1e-9:
+            return {
+                "gateway": t["gateway"],
+                "field": t["field"],
+                "from": b["amount"],
+                "to": t["amount"],
+                "currency": t.get("currency"),
+            }
+    return None
+
+
 def _body_differs(a: Optional[ResponseSnapshot], b: Optional[ResponseSnapshot]) -> float:
     """Normalised difference (0..1) between two response bodies."""
     sa = a.body if a else ""
@@ -282,6 +316,27 @@ def evaluate(
 
     target_error = _looks_like_error(target)
     signals["target_error_context"] = target_error
+
+    # 1b) Payment-gateway charge amount changed between the two runs. This is
+    # the money the customer is actually charged, so it is the most decisive
+    # proof of a live price manipulation -- checked ahead of everything else.
+    gw_change = _gateway_amount_change(base_list, tamp_list)
+    if gw_change:
+        signals["gateway_amount_change"] = gw_change
+        return OracleResult(
+            verdict=Verdict.CONFIRMED,
+            confidence=0.97,
+            reason=(
+                f"Live price manipulation confirmed at the payment gateway "
+                f"({gw_change['gateway']}): charge amount changed "
+                f"{gw_change['from']} -> {gw_change['to']} "
+                f"(field {gw_change['field']}) between baseline and tampered runs. "
+                f"The tampered price propagated to what the customer is charged."
+            ),
+            baseline_status=b_status,
+            tampered_status=t_status,
+            signals=signals,
+        )
 
     # 2) IDOR / authorization surface (id-like parameter or a path segment).
     is_id_surface = finding.parameter_location.value == "url_path" or bool(

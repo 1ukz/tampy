@@ -52,6 +52,7 @@ def _snapshot(resp: Optional[Dict[str, Any]]) -> Optional[ResponseSnapshot]:
         status=resp.get("status"),
         headers={str(k): str(v) for k, v in (resp.get("headers") or {}).items()},
         body=resp.get("body", "") or "",
+        request_body=resp.get("request_body"),
     )
 
 
@@ -89,11 +90,16 @@ def verify_finding(
     debug: bool = False,
     headless: bool = True,
     baseline: Optional[List[Dict[str, Any]]] = None,
+    judge_mode: Optional[str] = None,
 ) -> FindingResult:
     """Run a tampered replay and evaluate it against a baseline.
 
     If ``baseline`` (captured responses from an untampered run) is provided it
     is reused; otherwise a fresh baseline is captured for this finding.
+
+    If ``judge_mode`` ("local"/"remote") is set and the deterministic oracle is
+    INCONCLUSIVE, a single LLM-judge call is made to resolve it (the only
+    token-spending step in verification).
     """
     # Lazy import so core.verifier is importable without Playwright present
     # (e.g. for unit tests of the oracle wiring).
@@ -116,10 +122,18 @@ def verify_finding(
             ),
         )
 
-    oracle = evaluate(
-        finding,
-        str(finding.test_payload),
-        _snapshots(baseline),
-        _snapshots(tampered),
-    )
+    base_snaps = _snapshots(baseline)
+    tamp_snaps = _snapshots(tampered)
+    oracle = evaluate(finding, str(finding.test_payload), base_snaps, tamp_snaps)
+
+    # Escalate only genuinely ambiguous cases to the (paid) LLM judge.
+    if judge_mode and oracle.verdict == Verdict.INCONCLUSIVE:
+        from core.judge import judge_finding
+
+        ruled = judge_finding(
+            finding, oracle, base_snaps, tamp_snaps, mode=judge_mode, redactor=redactor
+        )
+        if ruled is not None:
+            oracle = ruled
+
     return FindingResult(finding=finding, oracle=oracle)

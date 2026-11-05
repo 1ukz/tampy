@@ -54,12 +54,13 @@ def _verdict_colour(verdict):
     }.get(verdict, bcolors.ENDC)
 
 
-def run_automated_verification(json_result, actions_file, redactor, debug):
+def run_automated_verification(json_result, actions_file, redactor, debug, judge_mode=None):
     """Agentic pass: replay each finding tampered and judge it against a shared
     baseline with the deterministic oracle (no LLM tokens spent).
 
     The untampered baseline is captured once and reused across findings, so the
-    cost is N+1 replays rather than 2N."""
+    cost is N+1 replays rather than 2N. If ``judge_mode`` is set, inconclusive
+    findings are escalated to a single LLM-judge call each."""
     from core.models import Verdict
     from core.verifier import capture_baseline, verify_finding
 
@@ -72,6 +73,11 @@ def run_automated_verification(json_result, actions_file, redactor, debug):
         f"{len(json_result)} finding(s). Capturing a shared baseline, then one "
         f"tampered replay per finding.{bcolors.ENDC}"
     )
+    if judge_mode:
+        print(
+            f"{bcolors.OKBLUE}[INFO]: Inconclusive findings will be escalated to "
+            f"the LLM judge ({judge_mode}).{bcolors.ENDC}"
+        )
 
     # Capture the untampered baseline once and reuse it for every finding.
     baseline = None
@@ -92,7 +98,12 @@ def run_automated_verification(json_result, actions_file, redactor, debug):
             f"param '{finding.parameter_name}')...{bcolors.ENDC}"
         )
         fr = verify_finding(
-            finding, actions_file, redactor=redactor, debug=debug, baseline=baseline
+            finding,
+            actions_file,
+            redactor=redactor,
+            debug=debug,
+            baseline=baseline,
+            judge_mode=judge_mode,
         )
         results.append(fr)
         if fr.oracle:
@@ -142,7 +153,7 @@ def _print_verification_summary(results, Verdict):
         )
 
 
-def edit_packet(url_input, json_result, actions_file, map_file, debug):
+def edit_packet(url_input, json_result, actions_file, map_file, mode, debug):
     actual_domain = urllib.parse.urlparse(url_input).netloc
 
     # Load the secret map so live replays use real cookies/tokens and the
@@ -166,8 +177,16 @@ def edit_packet(url_input, json_result, actions_file, map_file, debug):
     if yes_no_menu(
         f"{bcolors.BOLD}Run automated verification on all findings first? (y/n): {bcolors.ENDC}"
     ):
+        judge_mode = None
+        if yes_no_menu(
+            f"{bcolors.BOLD}Escalate inconclusive findings to the LLM judge? "
+            f"(costs a few tokens each) (y/n): {bcolors.ENDC}"
+        ):
+            judge_mode = mode
         try:
-            run_automated_verification(findings, actions_file, redactor, debug)
+            run_automated_verification(
+                findings, actions_file, redactor, debug, judge_mode=judge_mode
+            )
         except KeyboardInterrupt:
             print(f"{bcolors.WARNING}[WARNING]: Automated verification interrupted.{bcolors.ENDC}")
         except Exception as e:

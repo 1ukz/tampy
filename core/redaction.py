@@ -206,6 +206,14 @@ class Redactor:
     def redact_packets(self, packets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return [self.redact_packet(pkt) for pkt in packets]
 
+    def redact_text(self, value: str) -> str:
+        """Redact secrets from an arbitrary string (e.g. a response-body excerpt
+        before it is sent to the LLM judge). Applies the value-pattern rules
+        (JWT, bearer, email, card); does not attempt cookie-header parsing."""
+        if not isinstance(value, str) or not value:
+            return value
+        return self._redact_string(value)
+
     # -- re-injection ------------------------------------------------------
     def reinject(self, obj: Any) -> Any:
         """Recursively replace placeholders with their original values."""

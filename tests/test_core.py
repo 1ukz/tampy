@@ -14,8 +14,9 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.llm import extract_findings_payload, parse_response  # noqa: E402
-from core.models import Finding, Verdict, parse_findings  # noqa: E402
+from core.judge import build_judge_messages, parse_judge  # noqa: E402
+from core.llm import extract_findings_payload, extract_json_object, parse_response  # noqa: E402
+from core.models import Finding, OracleResult, Verdict, parse_findings  # noqa: E402
 from core.oracle import ResponseSnapshot, evaluate  # noqa: E402
 from core.redaction import Redactor, redact_packets_file  # noqa: E402
 from core.verifier import _snapshot, finding_to_tamper  # noqa: E402
@@ -294,6 +295,54 @@ class TestOraclePrecision(unittest.TestCase):
         self.assertGreater(res.confidence, 0.0)
 
 
+def _redsys_body(amount_cents):
+    import base64 as _b64
+    import json as _json
+    import urllib.parse as _up
+
+    params = {
+        "DS_MERCHANT_AMOUNT": str(amount_cents),
+        "DS_MERCHANT_ORDER": "000123",
+        "DS_MERCHANT_CURRENCY": "978",
+    }
+    blob = _b64.b64encode(_json.dumps(params).encode()).decode()
+    return _up.urlencode({"Ds_SignatureVersion": "HMAC_SHA256_V1", "Ds_MerchantParameters": blob})
+
+
+class TestGatewayOracle(unittest.TestCase):
+    """The amount sent to the payment gateway is the money actually charged."""
+
+    REDSYS = "https://sis.redsys.es/sis/realizarPago"
+
+    def _flow(self, cents):
+        cart = _resp("https://shop.test/api/cart", 200, '{"ok":true}')
+        gw = ResponseSnapshot(
+            url=self.REDSYS,
+            method="POST",
+            status=200,
+            body="<html>pago</html>",
+            request_body=_redsys_body(cents),
+        )
+        return [cart, gw]
+
+    def test_gateway_amount_change_confirmed(self):
+        baseline = self._flow(25000)  # 250.00 EUR
+        tampered = self._flow(1)  # 0.01 EUR
+        f = _finding(name="price", url="https://shop.test/api/cart")
+        res = evaluate(f, "0.01", baseline, tampered)
+        self.assertEqual(res.verdict, Verdict.CONFIRMED)
+        self.assertGreaterEqual(res.confidence, 0.9)
+        self.assertIn("redsys", res.reason.lower())
+
+    def test_gateway_amount_unchanged_not_confirmed(self):
+        # Server ignored the client price: gateway amount stays the same.
+        baseline = self._flow(25000)
+        tampered = self._flow(25000)
+        f = _finding(name="price", url="https://shop.test/api/cart")
+        res = evaluate(f, "0.01", baseline, tampered)
+        self.assertNotEqual(res.verdict, Verdict.CONFIRMED)
+
+
 class TestVerifierWiring(unittest.TestCase):
     def test_finding_to_tamper_reinjects(self):
         r = Redactor()
@@ -309,6 +358,44 @@ class TestVerifierWiring(unittest.TestCase):
         self.assertIsNone(_snapshot(None))
         snap = _snapshot({"url": "u", "status": 200, "headers": {}, "body": "x"})
         self.assertEqual(snap.status, 200)
+
+
+class TestJudge(unittest.TestCase):
+    def _oracle(self):
+        return OracleResult(
+            verdict=Verdict.INCONCLUSIVE, confidence=0.3, reason="unclear", signals={}
+        )
+
+    def test_parse_judge_valid(self):
+        out = parse_judge('{"verdict":"confirmed","confidence":0.9,"rationale":"total dropped"}')
+        self.assertEqual(out["verdict"], Verdict.CONFIRMED)
+        self.assertEqual(out["confidence"], 0.9)
+
+    def test_parse_judge_fenced_and_prose(self):
+        text = 'Ruling:\n```json\n{"verdict":"rejected","confidence":0.8}\n```'
+        out = parse_judge(text)
+        self.assertEqual(out["verdict"], Verdict.REJECTED)
+
+    def test_parse_judge_bad(self):
+        self.assertIsNone(parse_judge("not json"))
+        self.assertIsNone(parse_judge('{"verdict":"maybe"}'))
+
+    def test_build_messages_redacts_evidence(self):
+        # A token in a response body must be redacted before egress to the judge.
+        r = ResponseSnapshot(
+            url=URL,
+            method="POST",
+            status=200,
+            body='{"jwt":"eyJhbGciOiJIUzI1NiJ.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4abc"}',
+        )
+        msgs = build_judge_messages(_finding(), self._oracle(), [r], [r], Redactor())
+        blob = json.dumps(msgs)
+        self.assertNotIn("eyJhbGciOiJIUzI1NiJ", blob)
+        self.assertEqual(msgs[0]["role"], "system")
+
+    def test_extract_json_object(self):
+        self.assertEqual(extract_json_object('x {"a":1} y'), {"a": 1})
+        self.assertIsNone(extract_json_object("no object"))
 
 
 if __name__ == "__main__":

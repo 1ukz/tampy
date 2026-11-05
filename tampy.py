@@ -221,9 +221,9 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
     return result
 
 
-def phase_4(url_input, json_result, actions_file, map_file, debug):
+def phase_4(url_input, json_result, actions_file, map_file, mode, debug):
     print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 4]: CONTROL TESTING{bcolors.ENDC}")
-    edit_packet(url_input, json_result, actions_file, map_file, debug)
+    edit_packet(url_input, json_result, actions_file, map_file, mode, debug)
 
 
 def startup():
@@ -353,6 +353,7 @@ def main():
                                 json_result,
                                 actions_file,
                                 map_file,
+                                mode,
                                 debug,
                             )
                     else:

@@ -103,6 +103,28 @@ def extract_findings_payload(text: str) -> Optional[List[Dict[str, Any]]]:
     return None
 
 
+def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """Pull a single JSON object out of a raw model response (prose/fence safe)."""
+    if not text or not text.strip():
+        return None
+    candidates: List[str] = []
+    m = _FENCE.search(text)
+    if m:
+        candidates.append(m.group(1))
+    candidates.append(text)
+    for chunk in candidates:
+        span = _balanced_slice(chunk.strip(), "{", "}")
+        if not span:
+            continue
+        try:
+            data = json.loads(span)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
 def parse_response(text: str) -> Tuple[Optional[List[Dict[str, Any]]], List[Finding]]:
     """Return (raw_payload, validated_findings).
 

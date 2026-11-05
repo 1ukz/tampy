@@ -38,11 +38,24 @@ The oracle is built for **precision**, not just "did something change":
 
 | Signal | Example | Verdict |
 |---|---|---|
+| **Payment-gateway charge amount** changed between runs | Redsys `DS_MERCHANT_AMOUNT` 250.00 → 0.01 | **LIVE (confirmed, 0.97)** |
 | A **monetary field** (same JSON key) changed between runs | `grand_total` 250.00 → 2.50 on the confirmation step | **LIVE (confirmed)** |
 | Injected value **reflected** in an accepted, non-error response | coupon `FREE` echoed in a 2xx order object | **LIVE / likely** |
 | A **different resource** returned for another object id | `/account/1002` returns someone else's data | **LIVE (IDOR)** |
 | Targeted request **rejected** | HTTP 403 / `{"success": false}` | **rejected** |
 | Accepted but no distinguishing signal | identical 2xx body | **inconclusive** → optional LLM judge |
+
+**Payment gateways.** Purchase flows hand off to an external gateway
+("pasarela de pago") — Redsys, Stripe, PayPal, Adyen, and others. TAMPY keeps
+those cross-origin requests during replay and decodes the charge amount
+(including Redsys's base64 `Ds_MerchantParameters` blob). A changed amount at
+the gateway is the most decisive proof of a live price manipulation, because it
+is the money the customer is actually charged.
+
+**LLM judge (optional).** The deterministic oracle resolves almost everything
+for free. Only the genuinely `inconclusive` cases can be escalated — one cheap
+LLM call each, with a small, **redacted** evidence bundle — to get a final
+confirmed / rejected ruling. Everything else spends zero tokens.
 
 Key precision guards: it compares the **same field** across the two flows
 (not "the largest number", which IDs and timestamps fool), observes

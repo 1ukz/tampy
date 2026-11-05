@@ -518,11 +518,17 @@ _SKIP_CT = ("image/", "font/", "video/", "text/css", "audio/")
 
 
 def _make_flow_capturer(target, debug):
-    """Return (listener, store) that records every same-origin, non-asset
-    response of the flow, in order. Capturing the whole flow -- not just the
-    tampered request -- lets the oracle see downstream proof (e.g. a checkout
-    total that only reflects a tampered price on the confirmation step)."""
+    """Return (listener, store) that records every same-origin (and payment
+    gateway) non-asset response of the flow, in order.
+
+    Capturing the whole flow -- not just the tampered request -- lets the oracle
+    see downstream proof (e.g. a checkout total that only reflects a tampered
+    price on the confirmation step). Cross-origin **payment gateways** (Redsys,
+    Stripe, ...) are kept too, with their request body, because the amount sent
+    there is the money actually charged."""
     import urllib.parse as _up
+
+    from core.gateways import gateway_for_url
 
     want_host = _up.urlparse(target["url_pattern"]).netloc
     store: dict = {"responses": []}
@@ -531,14 +537,18 @@ def _make_flow_capturer(target, debug):
         try:
             req = response.request
             parsed = _up.urlparse(req.url)
-            # Same-origin only, skip static assets by extension or content-type.
-            if want_host and parsed.netloc and parsed.netloc != want_host:
+            is_gateway = gateway_for_url(req.url) is not None
+            # Keep same-origin responses and any payment-gateway request;
+            # drop other cross-origin traffic.
+            if want_host and parsed.netloc and parsed.netloc != want_host and not is_gateway:
                 return
-            if parsed.path.lower().endswith(_SKIP_EXTS):
-                return
-            ctype = (response.headers or {}).get("content-type", "").lower()
-            if any(ctype.startswith(c) for c in _SKIP_CT):
-                return
+            # Skip static assets (but never skip a gateway request).
+            if not is_gateway:
+                if parsed.path.lower().endswith(_SKIP_EXTS):
+                    return
+                ctype = (response.headers or {}).get("content-type", "").lower()
+                if any(ctype.startswith(c) for c in _SKIP_CT):
+                    return
             try:
                 body = response.text()
             except Exception:
@@ -546,10 +556,15 @@ def _make_flow_capturer(target, debug):
             # Cap very large bodies to keep comparison cheap.
             if len(body) > 200_000:
                 body = body[:200_000]
+            try:
+                request_body = req.post_data
+            except Exception:
+                request_body = None
             store["responses"].append(
                 {
                     "url": req.url,
                     "method": req.method,
+                    "request_body": request_body,
                     "status": response.status,
                     "headers": dict(response.headers),
                     "body": body,
