@@ -60,7 +60,7 @@ def _evidence(responses, redactor) -> List[Dict[str, Any]]:
     """Trim a captured flow into a small, redacted evidence list."""
     out: List[Dict[str, Any]] = []
     # Keep the last N responses (closest to the outcome / confirmation).
-    for r in list(responses)[-_MAX_RESPONSES:]:
+    for r in list(responses or [])[-_MAX_RESPONSES:]:
         out.append(
             {
                 "url": r.url,

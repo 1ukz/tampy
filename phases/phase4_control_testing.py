@@ -54,15 +54,19 @@ def _verdict_colour(verdict):
     }.get(verdict, bcolors.ENDC)
 
 
-def run_automated_verification(json_result, actions_file, redactor, debug, judge_mode=None):
+def run_automated_verification(
+    json_result, actions_file, redactor, debug, judge_mode=None, http_mode=False
+):
     """Agentic pass: replay each finding tampered and judge it against a shared
     baseline with the deterministic oracle (no LLM tokens spent).
 
     The untampered baseline is captured once and reused across findings, so the
     cost is N+1 replays rather than 2N. If ``judge_mode`` is set, inconclusive
-    findings are escalated to a single LLM-judge call each."""
+    findings are escalated to a single LLM-judge call each. If ``http_mode`` is
+    set, findings are confirmed via fast HTTP replay with payload sweeps (using
+    the browser baseline only to obtain the real in-flow requests)."""
     from core.models import Verdict
-    from core.verifier import capture_baseline, verify_finding
+    from core.verifier import capture_baseline, verify_finding, verify_finding_http
 
     if not json_result:
         print(f"{bcolors.WARNING}[WARNING]: No findings to verify.{bcolors.ENDC}")
@@ -97,14 +101,19 @@ def run_automated_verification(json_result, actions_file, redactor, debug, judge
             f"{finding.control_id} (packet {finding.packet_index}, "
             f"param '{finding.parameter_name}')...{bcolors.ENDC}"
         )
-        fr = verify_finding(
-            finding,
-            actions_file,
-            redactor=redactor,
-            debug=debug,
-            baseline=baseline,
-            judge_mode=judge_mode,
-        )
+        if http_mode and baseline:
+            fr = verify_finding_http(
+                finding, baseline, redactor=redactor, sweep=True, judge_mode=judge_mode
+            )
+        else:
+            fr = verify_finding(
+                finding,
+                actions_file,
+                redactor=redactor,
+                debug=debug,
+                baseline=baseline,
+                judge_mode=judge_mode,
+            )
         results.append(fr)
         if fr.oracle:
             col = _verdict_colour(fr.oracle.verdict)
@@ -177,6 +186,11 @@ def edit_packet(url_input, json_result, actions_file, map_file, mode, debug):
     if yes_no_menu(
         f"{bcolors.BOLD}Run automated verification on all findings first? (y/n): {bcolors.ENDC}"
     ):
+        http_mode = yes_no_menu(
+            f"{bcolors.BOLD}Use fast HTTP replay with payload sweeps? "
+            f"(faster, tries several payloads; browser replay is more thorough "
+            f"for gateway/downstream proof) (y/n): {bcolors.ENDC}"
+        )
         judge_mode = None
         if yes_no_menu(
             f"{bcolors.BOLD}Escalate inconclusive findings to the LLM judge? "
@@ -185,7 +199,12 @@ def edit_packet(url_input, json_result, actions_file, map_file, mode, debug):
             judge_mode = mode
         try:
             run_automated_verification(
-                findings, actions_file, redactor, debug, judge_mode=judge_mode
+                findings,
+                actions_file,
+                redactor,
+                debug,
+                judge_mode=judge_mode,
+                http_mode=http_mode,
             )
         except KeyboardInterrupt:
             print(f"{bcolors.WARNING}[WARNING]: Automated verification interrupted.{bcolors.ENDC}")

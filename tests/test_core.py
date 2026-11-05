@@ -360,6 +360,122 @@ class TestVerifierWiring(unittest.TestCase):
         self.assertEqual(snap.status, 200)
 
 
+class TestTamper(unittest.TestCase):
+    def test_body_urlencoded(self):
+        from core.tamper import apply_tamper
+
+        req = {
+            "method": "POST",
+            "url": "https://s.test/c",
+            "headers": {},
+            "body": "price=100&qty=1",
+        }
+        out = apply_tamper(
+            req, {"param_location": "body", "param_name": "price", "param_value": "1"}
+        )
+        self.assertIn("price=1", out["body"])
+        self.assertIn("qty=1", out["body"])
+        self.assertEqual(req["body"], "price=100&qty=1")  # input unchanged
+
+    def test_body_json(self):
+        from core.tamper import apply_tamper
+
+        req = {
+            "method": "POST",
+            "url": "https://s.test/c",
+            "headers": {"Content-Type": "application/json"},
+            "body": '{"price":100,"qty":1}',
+        }
+        out = apply_tamper(
+            req, {"param_location": "body", "param_name": "price", "param_value": "1"}
+        )
+        self.assertEqual(json.loads(out["body"])["price"], "1")
+
+    def test_query_and_path(self):
+        from core.tamper import apply_tamper
+
+        q = apply_tamper(
+            {"method": "GET", "url": "https://s.test/p?id=5&x=1", "headers": {}, "body": None},
+            {"param_location": "query", "param_name": "id", "param_value": "9"},
+        )
+        self.assertIn("id=9", q["url"])
+        p = apply_tamper(
+            {"method": "GET", "url": "https://s.test/account/1001", "headers": {}, "body": None},
+            {"param_location": "url_path", "param_name": "2", "param_value": "1002"},
+        )
+        self.assertTrue(p["url"].endswith("/account/1002"))
+
+    def test_header(self):
+        from core.tamper import apply_tamper
+
+        out = apply_tamper(
+            {
+                "method": "GET",
+                "url": "https://s.test/",
+                "headers": {"X-Role": "user"},
+                "body": None,
+            },
+            {"param_location": "headers", "param_name": "x-role", "param_value": "admin"},
+        )
+        self.assertEqual(out["headers"]["X-Role"], "admin")
+
+
+class TestPayloads(unittest.TestCase):
+    def test_price_sweep_includes_original_first(self):
+        from core.payloads import payloads_for
+
+        p = payloads_for(_finding(name="price", payload="5"))
+        self.assertEqual(p[0], "5")
+        self.assertIn("0.01", p)
+        self.assertIn("-1", p)
+
+    def test_id_not_fuzzed(self):
+        from core.payloads import payloads_for
+
+        p = payloads_for(_finding(loc="url_path", name="2", payload="1002"))
+        self.assertEqual(p, ["1002"])
+
+
+class TestSignatures(unittest.TestCase):
+    def test_detects_redsys_signature(self):
+        from core.signatures import signature_fields
+
+        body = "Ds_SignatureVersion=HMAC_SHA256_V1&Ds_MerchantParameters=abc&Ds_Signature=zzz"
+        self.assertIn("Ds_Signature", signature_fields("https://sis.redsys.es/sis", body))
+
+    def test_annotate_confirmed_flags_uncovered(self):
+        from core.signatures import annotate
+
+        msg = annotate("Live issue confirmed.", True, ["Ds_Signature"])
+        self.assertIn("does not cover", msg)
+
+    def test_annotate_rejected_notes_protection(self):
+        from core.signatures import annotate
+
+        msg = annotate("Rejected.", False, ["signature"])
+        self.assertIn("integrity-checked", msg)
+
+
+class TestHttpReplay(unittest.TestCase):
+    def test_replay_applies_tamper_via_injected_sender(self):
+        from core.http_replay import replay
+
+        captured = {}
+
+        def fake_sender(req, timeout):
+            captured["req"] = req
+            return {"url": req["url"], "method": req["method"], "status": 200, "body": "ok"}
+
+        req = {"method": "POST", "url": "https://s.test/c", "headers": {}, "body": "price=100"}
+        out = replay(
+            req,
+            {"param_location": "body", "param_name": "price", "param_value": "1"},
+            sender=fake_sender,
+        )
+        self.assertIn("price=1", captured["req"]["body"])
+        self.assertEqual(out["status"], 200)
+
+
 class TestJudge(unittest.TestCase):
     def _oracle(self):
         return OracleResult(

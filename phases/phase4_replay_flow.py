@@ -560,11 +560,21 @@ def _make_flow_capturer(target, debug):
                 request_body = req.post_data
             except Exception:
                 request_body = None
+            try:
+                # Full request headers (incl. cookies) so the HTTP replay engine
+                # can resend the request faithfully for payload sweeps.
+                request_headers = req.all_headers()
+            except Exception:
+                try:
+                    request_headers = dict(req.headers)
+                except Exception:
+                    request_headers = {}
             store["responses"].append(
                 {
                     "url": req.url,
                     "method": req.method,
                     "request_body": request_body,
+                    "request_headers": request_headers,
                     "status": response.status,
                     "headers": dict(response.headers),
                     "body": body,

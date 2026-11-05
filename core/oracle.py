@@ -274,6 +274,46 @@ def evaluate(
     baseline: Union[ResponseLike, List[ResponseSnapshot]],
     tampered: Union[ResponseLike, List[ResponseSnapshot]],
 ) -> OracleResult:
+    """Decide, with precision, whether the tamper is live on the target, then
+    enrich the verdict with signature/integrity context (Control 1.5)."""
+    result = _evaluate_core(finding, tamper_value, baseline, tampered)
+    _annotate_signatures(result, finding, _as_list(tampered))
+    return result
+
+
+def _annotate_signatures(
+    result: OracleResult, finding: Finding, tamp_list: List[ResponseSnapshot]
+) -> None:
+    from core.signatures import annotate, signature_fields
+
+    want_path = urllib.parse.urlparse(finding.modified_request_example.url).path
+    want_method = finding.modified_request_example.method or "GET"
+    target = _find_target(tamp_list, want_path, want_method)
+
+    sig: List[str] = []
+    candidates = [target] if target else []
+    # Also inspect gateway requests, which commonly carry the signature.
+    from core.gateways import gateway_for_url
+
+    candidates += [r for r in tamp_list if gateway_for_url(r.url)]
+    for r in candidates:
+        if r is None:
+            continue
+        for f in signature_fields(r.url, r.request_body):
+            if f not in sig:
+                sig.append(f)
+
+    if sig:
+        result.signals["signature_fields"] = sig
+        result.reason = annotate(result.reason, result.verdict == Verdict.CONFIRMED, sig)
+
+
+def _evaluate_core(
+    finding: Finding,
+    tamper_value: str,
+    baseline: Union[ResponseLike, List[ResponseSnapshot]],
+    tampered: Union[ResponseLike, List[ResponseSnapshot]],
+) -> OracleResult:
     """Decide, with precision, whether the tamper is live on the target.
 
     ``baseline`` / ``tampered`` may be a single response or the full list of

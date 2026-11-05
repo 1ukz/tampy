@@ -45,6 +45,23 @@ The oracle is built for **precision**, not just "did something change":
 | Targeted request **rejected** | HTTP 403 / `{"success": false}` | **rejected** |
 | Accepted but no distinguishing signal | identical 2xx body | **inconclusive** → optional LLM judge |
 
+**Payload sweeps.** The model proposes one payload per finding, but TAMPY also
+tries a small, deterministic set per parameter kind (price: `0.01`, `0`, `-1`;
+quantity: `-1`, `0`, `9999`; …) at **zero extra LLM cost**, stopping at the
+first confirmed hit. The model's own payload is always tried first.
+
+**Fast HTTP replay.** For a quick sweep, TAMPY can resend the targeted request
+directly over HTTP (reusing the session captured by one browser run) instead of
+driving the full UI each time — much faster. Browser replay stays the default
+when full-flow / payment-gateway proof is needed.
+
+**Signature / integrity awareness (Control 1.5).** TAMPY detects
+signature/HMAC fields (e.g. Redsys `Ds_Signature`) on the tampered request and
+sharpens the verdict accordingly: a rejection next to a signature reads as
+*integrity-protected*, while a **confirmed** tamper next to a signature is
+flagged as *"the signature does not cover the manipulated parameter"* — a
+finding in its own right.
+
 **Payment gateways.** Purchase flows hand off to an external gateway
 ("pasarela de pago") — Redsys, Stripe, PayPal, Adyen, and others. TAMPY keeps
 those cross-origin requests during replay and decodes the charge amount

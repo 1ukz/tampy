@@ -125,8 +125,12 @@ def verify_finding(
     base_snaps = _snapshots(baseline)
     tamp_snaps = _snapshots(tampered)
     oracle = evaluate(finding, str(finding.test_payload), base_snaps, tamp_snaps)
+    oracle = _maybe_judge(finding, oracle, base_snaps, tamp_snaps, judge_mode, redactor)
+    return FindingResult(finding=finding, oracle=oracle)
 
-    # Escalate only genuinely ambiguous cases to the (paid) LLM judge.
+
+def _maybe_judge(finding, oracle, base_snaps, tamp_snaps, judge_mode, redactor):
+    """Escalate only genuinely ambiguous cases to the (paid) LLM judge."""
     if judge_mode and oracle.verdict == Verdict.INCONCLUSIVE:
         from core.judge import judge_finding
 
@@ -134,6 +138,101 @@ def verify_finding(
             finding, oracle, base_snaps, tamp_snaps, mode=judge_mode, redactor=redactor
         )
         if ruled is not None:
-            oracle = ruled
+            return ruled
+    return oracle
 
-    return FindingResult(finding=finding, oracle=oracle)
+
+def _locate_request(capture: List[Dict[str, Any]], finding: Finding) -> Optional[Dict[str, Any]]:
+    """Find the captured in-flow request matching the finding's target."""
+    import urllib.parse
+
+    want_path = urllib.parse.urlparse(finding.modified_request_example.url).path.rstrip("/")
+    want_method = (finding.modified_request_example.method or "GET").upper()
+    match = None
+    for item in capture or []:
+        if (item.get("method") or "").upper() != want_method:
+            continue
+        if urllib.parse.urlparse(item.get("url", "")).path.rstrip("/") != want_path:
+            continue
+        match = item  # keep the last occurrence
+    return match
+
+
+def verify_finding_http(
+    finding: Finding,
+    baseline_capture: List[Dict[str, Any]],
+    redactor=None,
+    sweep: bool = True,
+    timeout: float = 15.0,
+    judge_mode: Optional[str] = None,
+) -> FindingResult:
+    """Fast verification: resend the targeted request directly over HTTP and
+    sweep a set of payloads, stopping at the first confirmed hit.
+
+    Requires a browser ``baseline_capture`` (to obtain the real in-flow request
+    with its cookies). Best for direct-effect confirmation; it does not observe
+    downstream/gateway responses, so a non-confirmed result here does not rule
+    the issue out -- the browser path may still confirm it.
+    """
+    from core.http_replay import replay
+    from core.payloads import payloads_for
+
+    located = _locate_request(baseline_capture, finding)
+    if not located:
+        return FindingResult(
+            finding=finding,
+            oracle=OracleResult(
+                verdict=Verdict.ERROR,
+                reason="Could not locate the targeted request in the captured flow "
+                "for HTTP replay; use browser replay instead.",
+            ),
+        )
+
+    request = {
+        "method": located.get("method"),
+        "url": located.get("url"),
+        "headers": located.get("request_headers") or {},
+        "body": located.get("request_body"),
+    }
+
+    try:
+        http_baseline = replay(request, None, timeout=timeout)
+    except Exception as e:
+        return FindingResult(
+            finding=finding,
+            oracle=OracleResult(verdict=Verdict.ERROR, reason=f"HTTP baseline replay failed: {e}"),
+        )
+
+    base_snaps = _snapshots([http_baseline])
+    payloads = payloads_for(finding) if sweep else [str(finding.test_payload)]
+
+    best: Optional[OracleResult] = None
+    best_tamp: List = []
+    best_rank = -1
+    rank = {
+        Verdict.CONFIRMED: 4,
+        Verdict.LIKELY: 3,
+        Verdict.INCONCLUSIVE: 2,
+        Verdict.REJECTED: 1,
+        Verdict.ERROR: 0,
+    }
+    for pv in payloads:
+        tamper = finding_to_tamper(finding, redactor)
+        tamper["param_value"] = pv
+        try:
+            http_tampered = replay(request, tamper, timeout=timeout)
+        except Exception:
+            continue
+        tamp_snaps = _snapshots([http_tampered])
+        oracle = evaluate(finding, str(pv), base_snaps, tamp_snaps)
+        oracle.signals["payload_tried"] = pv
+        if rank.get(oracle.verdict, 0) > best_rank:
+            best, best_tamp, best_rank = oracle, tamp_snaps, rank.get(oracle.verdict, 0)
+        if oracle.verdict == Verdict.CONFIRMED:
+            break  # short-circuit: a live payload is proof enough
+
+    if best is None:
+        best = OracleResult(verdict=Verdict.ERROR, reason="No HTTP payload could be sent.")
+    else:
+        best = _maybe_judge(finding, best, base_snaps, best_tamp, judge_mode, redactor)
+    return FindingResult(finding=finding, oracle=best)
