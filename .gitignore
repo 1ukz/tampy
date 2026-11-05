@@ -1,1 +1,24 @@
-* 
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets & local configuration
+.env
+
+# TAMPY runtime output: logs, HAR, recorded flows, analysis, and the
+# local secret-redaction maps (these contain real credentials — never commit).
+.logs/
+
+# Generated replay modules (built from recordings at replay time)
+*_replay.py
+
+# OS cruft
+.DS_Store
+Thumbs.db
