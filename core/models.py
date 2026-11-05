@@ -24,11 +24,11 @@ class ParameterLocation(str, Enum):
 class Verdict(str, Enum):
     """Result of the deterministic oracle after a tamper+replay."""
 
-    CONFIRMED = "confirmed"   # the response clearly shows the tamper took effect
-    LIKELY = "likely"         # strong but not conclusive signal
-    REJECTED = "rejected"     # server rejected or ignored the tamper
+    CONFIRMED = "confirmed"  # the response clearly shows the tamper took effect
+    LIKELY = "likely"  # strong but not conclusive signal
+    REJECTED = "rejected"  # server rejected or ignored the tamper
     INCONCLUSIVE = "inconclusive"  # not enough signal; may warrant an LLM judge
-    ERROR = "error"           # replay/transport failure
+    ERROR = "error"  # replay/transport failure
 
 
 class Severity(str, Enum):
@@ -97,9 +97,15 @@ class OracleResult(BaseModel):
 
     verdict: Verdict
     reason: str
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     baseline_status: Optional[int] = None
     tampered_status: Optional[int] = None
     signals: Dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def is_live(self) -> bool:
+        """True when the issue is confirmed exploitable on the live target."""
+        return self.verdict == Verdict.CONFIRMED
 
 
 class FindingResult(BaseModel):

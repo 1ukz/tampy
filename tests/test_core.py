@@ -6,22 +6,29 @@ Pure-Python only (no Playwright/OpenAI needed) so they run anywhere:
     pytest tests/                              # if pytest is installed
 """
 
+import json
 import os
 import sys
-import json
 import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.redaction import Redactor, redact_packets_file  # noqa: E402
-from core.models import Finding, parse_findings, Verdict  # noqa: E402
 from core.llm import extract_findings_payload, parse_response  # noqa: E402
-from core.oracle import evaluate, ResponseSnapshot  # noqa: E402
-from core.verifier import finding_to_tamper, _snapshot  # noqa: E402
+from core.models import Finding, Verdict, parse_findings  # noqa: E402
+from core.oracle import ResponseSnapshot, evaluate  # noqa: E402
+from core.redaction import Redactor, redact_packets_file  # noqa: E402
+from core.verifier import _snapshot, finding_to_tamper  # noqa: E402
 
 
-def _finding(loc="body", name="price", payload="0.01", **extra):
+def _finding(
+    loc="body",
+    name="price",
+    payload="0.01",
+    url="https://shop.test/api/checkout",
+    method="POST",
+    **extra,
+):
     base = dict(
         control_id="1.4",
         packet_index=0,
@@ -31,14 +38,18 @@ def _finding(loc="body", name="price", payload="0.01", **extra):
         exploitation_hypothesis="h",
         test_payload=payload,
         modified_request_example={
-            "url": "https://shop.test/api/checkout",
-            "method": "POST",
+            "url": url,
+            "method": method,
             "headers": {},
             "body_data": "price=0.01",
         },
     )
     base.update(extra)
     return Finding.model_validate(base)
+
+
+def _resp(url, status, body, method="POST"):
+    return ResponseSnapshot(url=url, method=method, status=status, body=body)
 
 
 class TestRedaction(unittest.TestCase):
@@ -161,39 +172,126 @@ class TestModelsAndParsing(unittest.TestCase):
         self.assertIsNone(payload)
 
 
+URL = "https://shop.test/api/checkout"
+
+
 class TestOracle(unittest.TestCase):
     def test_price_drop_confirmed(self):
-        b = ResponseSnapshot(url="u", status=200, body='{"total":100.0}')
-        t = ResponseSnapshot(url="u", status=200, body='{"total":0.01}')
-        self.assertEqual(evaluate(_finding(), "0.01", b, t).verdict, Verdict.CONFIRMED)
+        b = _resp(URL, 200, '{"total":100.0}')
+        t = _resp(URL, 200, '{"total":0.01}')
+        res = evaluate(_finding(), "0.01", b, t)
+        self.assertEqual(res.verdict, Verdict.CONFIRMED)
+        self.assertTrue(res.is_live)
+        self.assertGreaterEqual(res.confidence, 0.7)
 
-    def test_rejected(self):
-        b = ResponseSnapshot(url="u", status=200, body="{}")
-        t = ResponseSnapshot(url="u", status=403, body="no")
+    def test_rejected_status(self):
+        b = _resp(URL, 200, "{}")
+        t = _resp(URL, 403, "no")
         self.assertEqual(evaluate(_finding(), "0.01", b, t).verdict, Verdict.REJECTED)
 
     def test_reflected_value_confirmed(self):
-        b = ResponseSnapshot(url="u", status=200, body='{"coupon":"NONE"}')
-        t = ResponseSnapshot(url="u", status=200, body='{"coupon":"FREE"}')
+        b = _resp(URL, 200, '{"coupon":"NONE"}')
+        t = _resp(URL, 200, '{"coupon":"FREE"}')
         f = _finding(name="coupon_code", payload="FREE")
         self.assertEqual(evaluate(f, "FREE", b, t).verdict, Verdict.CONFIRMED)
 
     def test_server_error_likely(self):
-        b = ResponseSnapshot(url="u", status=200, body="{}")
-        t = ResponseSnapshot(url="u", status=500, body="boom")
+        b = _resp(URL, 200, "{}")
+        t = _resp(URL, 500, "boom")
         self.assertEqual(
             evaluate(_finding(name="qty", payload="-1"), "-1", b, t).verdict,
             Verdict.LIKELY,
         )
 
     def test_inconclusive(self):
-        b = ResponseSnapshot(url="u", status=200, body="SAME")
-        t = ResponseSnapshot(url="u", status=200, body="SAME")
-        f = _finding(loc="headers", name="X-Role", payload="admin")
+        b = _resp(URL, 200, "SAME")
+        t = _resp(URL, 200, "SAME")
+        f = _finding(loc="query", name="view", payload="admin")
         self.assertEqual(evaluate(f, "admin", b, t).verdict, Verdict.INCONCLUSIVE)
 
     def test_error_no_response(self):
         self.assertEqual(evaluate(_finding(), "0.01", None, None).verdict, Verdict.ERROR)
+
+
+class TestOraclePrecision(unittest.TestCase):
+    """Tests for the precision upgrades: downstream proof, error-context,
+    IDOR semantics, and avoiding the 'largest number' trap."""
+
+    def test_downstream_proof_confirmed(self):
+        # The tampered request is the cart; the proof shows up later, at the
+        # confirmation step. Whole-flow capture must catch it.
+        cart = "https://shop.test/api/cart"
+        confirm = "https://shop.test/api/confirm"
+        baseline = [
+            _resp(cart, 200, '{"ok":true}'),
+            _resp(confirm, 200, '{"grand_total":250.00,"order_id":11}'),
+        ]
+        tampered = [
+            _resp(cart, 200, '{"ok":true}'),
+            _resp(confirm, 200, '{"grand_total":2.50,"order_id":12}'),
+        ]
+        f = _finding(name="price", url=cart)
+        res = evaluate(f, "2.50", baseline, tampered)
+        self.assertEqual(res.verdict, Verdict.CONFIRMED)
+
+    def test_error_context_is_not_a_hit(self):
+        # Value is reflected, but inside an error envelope -> must NOT confirm.
+        b = _resp(URL, 200, '{"coupon":"NONE"}')
+        t = _resp(URL, 200, '{"success":false,"error":"invalid coupon FREE"}')
+        f = _finding(name="coupon_code", payload="FREE")
+        res = evaluate(f, "FREE", b, t)
+        self.assertEqual(res.verdict, Verdict.REJECTED)
+
+    def test_largest_number_trap_avoided(self):
+        # A big unrelated number (timestamp) changes, but no monetary field does.
+        b = _resp(URL, 200, '{"total":100.0,"timestamp":1699999999999}')
+        t = _resp(URL, 200, '{"total":100.0,"timestamp":1700000000000}')
+        res = evaluate(_finding(), "0.01", b, t)
+        self.assertNotEqual(res.verdict, Verdict.CONFIRMED)
+
+    def test_idor_confirmed(self):
+        acct = "https://shop.test/api/account/1001"
+        b = _resp(acct, 200, '{"user":"me","orders":[1,2,3],"balance":50}', method="GET")
+        t = _resp(
+            "https://shop.test/api/account/1002",
+            200,
+            '{"user":"someone_else","orders":[9,8,7,6],"balance":9999}',
+            method="GET",
+        )
+        f = _finding(
+            loc="url_path",
+            name="4",
+            payload="1002",
+            url="https://shop.test/api/account/1002",
+            method="GET",
+        )
+        res = evaluate(f, "1002", b, t)
+        self.assertEqual(res.verdict, Verdict.CONFIRMED)
+
+    def test_idor_protected_rejected(self):
+        b = _resp("https://shop.test/api/account/1001", 200, '{"user":"me"}', method="GET")
+        t = _resp("https://shop.test/api/account/1002", 403, "Forbidden", method="GET")
+        f = _finding(
+            loc="url_path",
+            name="4",
+            payload="1002",
+            url="https://shop.test/api/account/1002",
+            method="GET",
+        )
+        self.assertEqual(evaluate(f, "1002", b, t).verdict, Verdict.REJECTED)
+
+    def test_idor_identical_inconclusive(self):
+        url2 = "https://shop.test/api/account/1002"
+        b = _resp("https://shop.test/api/account/1001", 200, '{"generic":"page"}', method="GET")
+        t = _resp(url2, 200, '{"generic":"page"}', method="GET")
+        f = _finding(loc="url_path", name="4", payload="1002", url=url2, method="GET")
+        self.assertEqual(evaluate(f, "1002", b, t).verdict, Verdict.INCONCLUSIVE)
+
+    def test_confidence_is_populated(self):
+        b = _resp(URL, 200, '{"total":100.0}')
+        t = _resp(URL, 200, '{"total":1.0}')
+        res = evaluate(_finding(), "1.0", b, t)
+        self.assertGreater(res.confidence, 0.0)
 
 
 class TestVerifierWiring(unittest.TestCase):

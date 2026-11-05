@@ -1,14 +1,16 @@
-import importlib
-import json
-from pathlib import Path
-import urllib.parse
 import base64
-import zlib
+import binascii
 import gzip
+import importlib.util
+import json
+import urllib.parse
+import zlib
 from io import BytesIO
-from playwright.sync_api import sync_playwright
-from resources.bcolors import bcolors
+from pathlib import Path
 
+from playwright.sync_api import sync_playwright
+
+from resources.bcolors import bcolors
 
 PAUSE_SNIPPET = [
     "    # ---------------------\n",
@@ -51,7 +53,7 @@ def decode_value(value):
                         return decoded_str, "base64"
                 except UnicodeDecodeError:
                     pass
-    except (base64.binascii.Error, UnicodeDecodeError):
+    except (binascii.Error, UnicodeDecodeError):
         pass
 
     try:
@@ -117,7 +119,7 @@ def setup_tampering(context, tamper_configs, debug):
             param_name = config.get("param_name")
             new_value = str(config.get("param_value"))
             body_method = config.get("body_method", "")
-            overrides = {}
+            overrides: dict = {}
 
             # Match scheme, netloc, and method
             if (
@@ -152,15 +154,11 @@ def setup_tampering(context, tamper_configs, debug):
                             print(
                                 f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url} (Method: {request_body_method}){bcolors.ENDC}"
                             )
-                            print(
-                                f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}"
-                            )
+                            print(f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}")
                             parsed_body[param_name] = [new_value]
                             body = urllib.parse.urlencode(parsed_body, doseq=True)
                             overrides["post_data"] = body
-                            print(
-                                f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}"
-                            )
+                            print(f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}")
                             route.continue_(**overrides)
                             matched = True
                         else:
@@ -172,10 +170,7 @@ def setup_tampering(context, tamper_configs, debug):
                         for key, values in parsed_body.items():
                             for j, value in enumerate(values):
                                 decoded_value, encoding = decode_value(value)
-                                if (
-                                    isinstance(decoded_value, dict)
-                                    and param_name in decoded_value
-                                ):
+                                if isinstance(decoded_value, dict) and param_name in decoded_value:
                                     current_value = str(decoded_value[param_name])
                                     if current_value != new_value:
                                         print(
@@ -185,13 +180,9 @@ def setup_tampering(context, tamper_configs, debug):
                                             f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}"
                                         )
                                         decoded_value[param_name] = new_value
-                                        modified_value = encode_value(
-                                            decoded_value, encoding
-                                        )
+                                        modified_value = encode_value(decoded_value, encoding)
                                         parsed_body[key][j] = modified_value
-                                        body = urllib.parse.urlencode(
-                                            parsed_body, doseq=True
-                                        )
+                                        body = urllib.parse.urlencode(parsed_body, doseq=True)
                                         overrides["post_data"] = body
                                         print(
                                             f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}"
@@ -213,15 +204,11 @@ def setup_tampering(context, tamper_configs, debug):
                                 print(
                                     f"{bcolors.OKGREEN}[TAMPERING]: Matched config for: {request.url} (Method: {request_body_method}{bcolors.ENDC})"
                                 )
-                                print(
-                                    f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}"
-                                )
+                                print(f"{bcolors.WARNING}  Original body: {body}{bcolors.ENDC}")
                                 data[param_name] = new_value
                                 body = json.dumps(data)
                                 overrides["post_data"] = body
-                                print(
-                                    f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}"
-                                )
+                                print(f"{bcolors.WARNING}  Modified body: {body}{bcolors.ENDC}")
                                 route.continue_(**overrides)
                                 matched = True
                             else:
@@ -294,9 +281,7 @@ def setup_tampering(context, tamper_configs, debug):
                             )
                         )
                         overrides["url"] = new_url
-                        print(
-                            f"{bcolors.WARNING}  Modified query: {new_query}{bcolors.ENDC}"
-                        )
+                        print(f"{bcolors.WARNING}  Modified query: {new_query}{bcolors.ENDC}")
                         route.continue_(**overrides)
                         matched = True
                     else:
@@ -319,22 +304,19 @@ def setup_tampering(context, tamper_configs, debug):
                 pattern_segments = pattern_path.split("/")
                 request_segments = request_path.split("/")
 
-                # Find the position of the parameter in the pattern
-                param_position = int(param_name)
+                # Find the position of the parameter in the pattern.
                 try:
-                    param_val = pattern_segments[param_position]
-                except ValueError:
+                    param_position = int(param_name)
+                    _ = pattern_segments[param_position]  # bounds check
+                except (ValueError, IndexError):
                     debugLog(
-                        f"[DEBUG]: Parameter position {param_name} not found in pattern path",
+                        f"[DEBUG]: Parameter position {param_name} not valid for pattern path",
                         debug,
                     )
                     continue
 
                 # Verify base path matches
-                if (
-                    pattern_segments[:param_position]
-                    != request_segments[:param_position]
-                ):
+                if pattern_segments[:param_position] != request_segments[:param_position]:
                     debugLog(f"[DEBUG]: Base path mismatch for {request.url}", debug)
                     continue
 
@@ -375,9 +357,7 @@ def setup_tampering(context, tamper_configs, debug):
                         debug,
                     )
             else:
-                debugLog(
-                    f"[DEBUG]: Path segment count mismatch for {request.url}", debug
-                )
+                debugLog(f"[DEBUG]: Path segment count mismatch for {request.url}", debug)
 
             # A route may only be resolved once. As soon as one config has
             # handled (continued) this request, stop iterating the rest,
@@ -458,9 +438,7 @@ def build_replay_module(actions_file, pause=True):
 
 # Backwards-compatible alias (older callers used post_process in place).
 def post_process(path, pause=True):
-    path.write_text(
-        _transform_source(path.read_text(encoding="utf-8"), pause), encoding="utf-8"
-    )
+    path.write_text(_transform_source(path.read_text(encoding="utf-8"), pause), encoding="utf-8")
 
 
 def load_actions_module(actions_file):
@@ -504,9 +482,7 @@ def replay_actions_with_tamper(actions_file, tamper_configs, debug):
                 if hasattr(module, "run_actions"):
                     module.run_actions(page)
                 else:
-                    raise RuntimeError(
-                        "No run_actions function found in actions script"
-                    )
+                    raise RuntimeError("No run_actions function found in actions script")
 
             except Exception as e:
                 print(f"{bcolors.FAIL}[ERROR] Replay failed: {e}{bcolors.ENDC}")
@@ -518,33 +494,68 @@ def replay_actions_with_tamper(actions_file, tamper_configs, debug):
         browser.close()
 
 
-def _make_response_capturer(target, debug):
-    """Return (listener, store) that records the response for the tampered
-    request, matched by path + method against the target config."""
+# Response content types / extensions that carry no business logic and would
+# only add noise (and body-size cost) to the oracle's comparison.
+_SKIP_EXTS = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".ico",
+    ".css",
+    ".js",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".map",
+    ".mp4",
+    ".webm",
+    ".avif",
+)
+_SKIP_CT = ("image/", "font/", "video/", "text/css", "audio/")
+
+
+def _make_flow_capturer(target, debug):
+    """Return (listener, store) that records every same-origin, non-asset
+    response of the flow, in order. Capturing the whole flow -- not just the
+    tampered request -- lets the oracle see downstream proof (e.g. a checkout
+    total that only reflects a tampered price on the confirmation step)."""
     import urllib.parse as _up
 
-    want_path = _up.urlparse(target["url_pattern"]).path.rstrip("/")
-    want_method = target["method"].upper()
-    store = {"response": None}
+    want_host = _up.urlparse(target["url_pattern"]).netloc
+    store: dict = {"responses": []}
 
     def on_response(response):
         try:
             req = response.request
-            if req.method.upper() != want_method:
+            parsed = _up.urlparse(req.url)
+            # Same-origin only, skip static assets by extension or content-type.
+            if want_host and parsed.netloc and parsed.netloc != want_host:
                 return
-            if _up.urlparse(req.url).path.rstrip("/") != want_path:
+            if parsed.path.lower().endswith(_SKIP_EXTS):
+                return
+            ctype = (response.headers or {}).get("content-type", "").lower()
+            if any(ctype.startswith(c) for c in _SKIP_CT):
                 return
             try:
                 body = response.text()
             except Exception:
                 body = ""
-            store["response"] = {
-                "url": req.url,
-                "status": response.status,
-                "headers": dict(response.headers),
-                "body": body,
-            }
-            debugLog(f"[DEBUG]: Captured response {response.status} for {req.url}", debug)
+            # Cap very large bodies to keep comparison cheap.
+            if len(body) > 200_000:
+                body = body[:200_000]
+            store["responses"].append(
+                {
+                    "url": req.url,
+                    "method": req.method,
+                    "status": response.status,
+                    "headers": dict(response.headers),
+                    "body": body,
+                }
+            )
+            debugLog(f"[DEBUG]: Captured {response.status} {req.method} {req.url}", debug)
         except Exception as e:
             debugLog(f"[DEBUG]: response capture error: {e}", debug)
 
@@ -552,11 +563,11 @@ def _make_response_capturer(target, debug):
 
 
 def run_replay_capture(actions_file, tamper_configs, target, debug=False, headless=True):
-    """Replay the flow once (optionally tampering) and capture the response for
-    ``target``. Returns the captured response dict or ``None``.
+    """Replay the flow once (optionally tampering) and capture every same-origin
+    response. Returns an ordered list of response dicts.
 
     Used by the deterministic verifier: run once untampered for a baseline and
-    once tampered, then diff the two captured responses.
+    once tampered, then diff the two captured flows.
     """
     replay_module = build_replay_module(actions_file, pause=False)
     module = load_actions_module(replay_module)
@@ -568,7 +579,7 @@ def run_replay_capture(actions_file, tamper_configs, target, debug=False, headle
         context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 
-        listener, store = _make_response_capturer(target, debug)
+        listener, store = _make_flow_capturer(target, debug)
         page.on("response", listener)
 
         _prime_body_method(tamper_configs)
@@ -583,4 +594,4 @@ def run_replay_capture(actions_file, tamper_configs, target, debug=False, headle
             context.close()
             browser.close()
 
-    return store["response"]
+    return store["responses"]

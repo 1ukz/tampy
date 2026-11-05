@@ -1,8 +1,9 @@
-import os
 import json
-from resources.bcolors import bcolors
+import os
+
 from core.llm import build_client, messages_for, parse_response
-from core.models import Finding, parse_findings
+from core.models import Finding
+from resources.bcolors import bcolors
 
 
 def print_ai_answer(result):
@@ -26,9 +27,7 @@ def print_ai_answer(result):
         )
         print(f"{bcolors.WARNING} [Parameter]: {bcolors.ENDC}{item['parameter_name']}")
         print(f"{bcolors.WARNING} [Parameter location]: {bcolors.ENDC}{loc}")
-        print(
-            f"{bcolors.WARNING} [Test payload]: {bcolors.ENDC}{item['test_payload']}\n"
-        )
+        print(f"{bcolors.WARNING} [Test payload]: {bcolors.ENDC}{item['test_payload']}\n")
         print(f"{bcolors.WARNING} Modified request example:{bcolors.ENDC}")
         print(json.dumps(item["modified_request_example"], indent=2))
         print("=" * 100 + "\n")
@@ -106,7 +105,7 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         "        * 'method': (String) HTTP method\n"
         "        * 'headers': (Object) Key-value pairs of headers\n"
         "        * 'body_data': (String) Request body if applicable\n"
-        "Crucial instructions for the modified request:\n" 
+        "Crucial instructions for the modified request:\n"
         "- When providing 'modified_request_example', ONLY change the specific parameter being tested, and it should always be ONLY one.\n"
         "- Preserve ALL other headers and body content exactly as in the original request\n"
         "- If the modified data is in the body parameters, provide ONLY the changed parameter value, not the entire body\n"
@@ -135,7 +134,6 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
 
     raw_output = ""
     raw_reasoning_content = ""
-    result = []
     try:
         if not streaming:
             # Request a structured JSON object where supported; fall back
@@ -154,9 +152,7 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
                     temperature=0.2,
                 )
 
-            raw_reasoning_content = getattr(
-                resp.choices[0].message, "reasoning_content", ""
-            )
+            raw_reasoning_content = getattr(resp.choices[0].message, "reasoning_content", "")
             raw_output = resp.choices[0].message.content
 
             if show_think and raw_reasoning_content:

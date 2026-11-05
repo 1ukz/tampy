@@ -1,0 +1,1 @@
+"""TAMPY shared resources."""

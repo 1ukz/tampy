@@ -1,43 +1,81 @@
 """Deterministic verification oracle (P1).
 
-The agentic value of TAMPY comes from *verifying* a hypothesis, not just
-suggesting it. But doing that with an LLM in the loop is expensive. So the
-oracle is pure Python: it compares a baseline response (flow replayed
-untampered) with the tampered response and decides, with no tokens spent,
-whether the tamper took effect.
+The agentic value of TAMPY is *verifying*, with precision, whether a proposed
+issue is actually live on the target -- not merely suggesting it. Doing that
+with an LLM in the loop would be expensive and non-reproducible, so the oracle
+is pure Python: it compares the whole flow replayed **untampered** (baseline)
+against the flow replayed **tampered**, and decides with no tokens spent.
 
-Only genuinely ambiguous cases (``INCONCLUSIVE``) need to be escalated to an
-LLM judge by the caller, which keeps cost close to a one-shot run.
+Precision design (why this beats a naive "did the response change?"):
+
+* **Whole-flow observation.** In a purchase flow the proof of a price/qty
+  tamper usually appears *downstream* (the checkout/confirmation total), not in
+  the immediate response. The oracle is given every response from both runs.
+* **Same-field comparison.** It pairs responses by path, flattens their JSON,
+  and compares *the same monetary field* across baseline vs tampered -- instead
+  of guessing the "largest number" is the total (which IDs/timestamps fool).
+* **Error-context awareness.** A value echoed inside an error body, or a 2xx
+  carrying ``{"success": false}``, is treated as a rejection, not a hit, which
+  removes the main class of false positives.
+* **Authorization semantics for IDOR.** For id-like parameters the verdict is
+  driven by whether access was granted to a *different* resource vs blocked.
+* **Calibrated confidence.** Signals combine into a 0..1 confidence; only a
+  high score yields CONFIRMED ("live"). Mid scores are LIKELY; genuine
+  ambiguity is INCONCLUSIVE and is what the LLM judge is reserved for.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Optional
+import urllib.parse
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel
 
 from core.models import Finding, OracleResult, Verdict
 
 # Status codes that signal the server rejected the tampered input outright.
-_REJECT_STATUSES = {400, 401, 403, 409, 422}
+_REJECT_STATUSES = {400, 401, 403, 404, 409, 422}
 
-# Parameter names whose manipulation we can price-check numerically.
-_VALUE_PARAMS = re.compile(
-    r"(?i)(price|amount|total|cost|qty|quantity|discount|balance|credit|points)"
+# Final-segment field names that denote money/quantity totals in a response.
+_MONETARY = re.compile(
+    r"(?i)(price|amount|total|subtotal|grand|cost|balance|due|payable|charge|"
+    r"sum|discount|credit|points|qty|quantity)"
 )
+
+# Parameter names / kinds that identify a resource (IDOR surface).
+_ID_PARAM = re.compile(
+    r"(?i)(^id$|_id$|^id|user|order|account|profile|address|cart|invoice|"
+    r"customer|uuid|guid|email|token|ref)"
+)
+
+# Error signals inside an otherwise-2xx response body.
+_ERROR_TOKENS = re.compile(
+    r"(?i)\b(error|invalid|denied|forbidden|unauthori[sz]ed|not\s+allowed|"
+    r"declined|failed|cannot|could\s+not|out\s+of\s+stock|not\s+found)\b"
+)
+
+# Confidence thresholds -> verdict.
+_CONFIRM_AT = 0.70
+_LIKELY_AT = 0.40
+
+ResponseLike = Union["ResponseSnapshot", None]
 
 
 class ResponseSnapshot(BaseModel):
-    """A captured HTTP response for the tampered request."""
+    """A single captured HTTP response from a replay."""
 
     model_config = {"extra": "ignore"}
 
     url: str
+    method: Optional[str] = None
     status: Optional[int] = None
     headers: Dict[str, str] = {}
     body: str = ""
+
+    def path(self) -> str:
+        return urllib.parse.urlparse(self.url).path.rstrip("/")
 
     def json_body(self) -> Optional[Any]:
         try:
@@ -46,173 +84,385 @@ class ResponseSnapshot(BaseModel):
             return None
 
 
-def _contains(body: str, value: str) -> bool:
-    if not body or value is None:
-        return False
-    return str(value) in body
-
-
+# --------------------------------------------------------------------------- #
+# Low-level helpers
+# --------------------------------------------------------------------------- #
 def _numeric(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
     try:
         return float(str(value).replace(",", "").strip())
     except (ValueError, AttributeError):
         return None
 
 
+def _as_list(x: Union[ResponseLike, List[ResponseSnapshot]]) -> List[ResponseSnapshot]:
+    if x is None:
+        return []
+    if isinstance(x, list):
+        return [r for r in x if r is not None]
+    return [x]
+
+
+def _flatten(obj: Any, prefix: str = "") -> Dict[str, Any]:
+    """Flatten a JSON structure to ``dotted.path -> scalar`` leaves."""
+    out: Dict[str, Any] = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            key = f"{prefix}.{k}" if prefix else str(k)
+            out.update(_flatten(v, key))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out.update(_flatten(v, f"{prefix}[{i}]"))
+    else:
+        if prefix:
+            out[prefix] = obj
+    return out
+
+
+def _leaf_name(path: str) -> str:
+    return path.split(".")[-1].split("[")[0]
+
+
+def _looks_like_error(resp: Optional[ResponseSnapshot]) -> bool:
+    """Detect an error context even behind a 2xx status."""
+    if resp is None:
+        return False
+    if resp.status is not None and resp.status >= 400:
+        return True
+    j = resp.json_body()
+    if isinstance(j, dict):
+        if j.get("error") or j.get("errors"):
+            return True
+        if j.get("success") is False or j.get("ok") is False:
+            return True
+        status_field = str(j.get("status", "")).lower()
+        if status_field in {"error", "failed", "failure", "denied"}:
+            return True
+    # Token check only on JSON or small bodies, to avoid flagging large HTML
+    # pages that merely contain the word "error" somewhere.
+    if j is not None or len(resp.body) < 800:
+        if _ERROR_TOKENS.search(resp.body or ""):
+            return True
+    return False
+
+
+def _find_target(
+    responses: List[ResponseSnapshot], want_path: str, want_method: str
+) -> Optional[ResponseSnapshot]:
+    want_path = want_path.rstrip("/")
+    matches = [
+        r
+        for r in responses
+        if r.path() == want_path and (r.method or want_method).upper() == want_method.upper()
+    ]
+    # Prefer the last matching occurrence (closest to the tamper's effect).
+    return matches[-1] if matches else None
+
+
+def _monetary_changes(
+    baseline: List[ResponseSnapshot], tampered: List[ResponseSnapshot]
+) -> List[Dict[str, Any]]:
+    """Compare the *same* monetary field across the two flows, paired by path.
+
+    Between two otherwise-identical runs, a monetary total only changes because
+    the injected value was honoured server-side -- so any such change is strong,
+    precise evidence (far better than comparing the largest number).
+    """
+
+    def index(lst: List[ResponseSnapshot]) -> Dict[str, Dict[str, Any]]:
+        d: Dict[str, Dict[str, Any]] = {}
+        for r in lst:
+            j = r.json_body()
+            if j is None:
+                continue
+            d.setdefault(r.path(), {}).update(_flatten(j))
+        return d
+
+    b_idx, t_idx = index(baseline), index(tampered)
+    changes: List[Dict[str, Any]] = []
+    for path, t_flat in t_idx.items():
+        b_flat = b_idx.get(path, {})
+        for key, t_val in t_flat.items():
+            if not _MONETARY.search(_leaf_name(key)):
+                continue
+            if key not in b_flat:
+                continue
+            t_num, b_num = _numeric(t_val), _numeric(b_flat[key])
+            if t_num is None or b_num is None:
+                continue
+            if abs(t_num - b_num) > 1e-9:
+                changes.append(
+                    {
+                        "field": f"{path}:{key}" if path else key,
+                        "from": b_num,
+                        "to": t_num,
+                        "decreased": t_num < b_num,
+                        "increased": t_num > b_num,
+                    }
+                )
+    return changes
+
+
+def _body_differs(a: Optional[ResponseSnapshot], b: Optional[ResponseSnapshot]) -> float:
+    """Normalised difference (0..1) between two response bodies."""
+    sa = a.body if a else ""
+    sb = b.body if b else ""
+    if not sa and not sb:
+        return 0.0
+    longest = max(len(sa), len(sb)) or 1
+    return abs(len(sa) - len(sb)) / longest
+
+
+def _reflected_in_success(
+    tampered: List[ResponseSnapshot], baseline: List[ResponseSnapshot], value: str
+) -> bool:
+    """Injected value appears in an accepted, non-error tampered response and was
+    not already present anywhere in the baseline."""
+    if not value:
+        return False
+    in_baseline = any(value in (r.body or "") for r in baseline)
+    if in_baseline:
+        return False
+    for r in tampered:
+        if r.status is not None and r.status < 400 and not _looks_like_error(r):
+            if value in (r.body or ""):
+                return True
+    return False
+
+
+# --------------------------------------------------------------------------- #
+# Main entry point
+# --------------------------------------------------------------------------- #
 def evaluate(
     finding: Finding,
     tamper_value: str,
-    baseline: Optional[ResponseSnapshot],
-    tampered: Optional[ResponseSnapshot],
+    baseline: Union[ResponseLike, List[ResponseSnapshot]],
+    tampered: Union[ResponseLike, List[ResponseSnapshot]],
 ) -> OracleResult:
-    """Decide whether the tamper took effect, deterministically."""
+    """Decide, with precision, whether the tamper is live on the target.
 
-    if tampered is None:
+    ``baseline`` / ``tampered`` may be a single response or the full list of
+    responses captured during each replay; a list enables downstream proof.
+    """
+    base_list = _as_list(baseline)
+    tamp_list = _as_list(tampered)
+
+    if not tamp_list:
         return OracleResult(
             verdict=Verdict.ERROR,
+            confidence=0.0,
             reason="No tampered response was captured (replay/transport failure).",
         )
 
-    b_status = baseline.status if baseline else None
-    t_status = tampered.status
-    signals: Dict[str, Any] = {}
+    want_path = urllib.parse.urlparse(finding.modified_request_example.url).path
+    want_method = finding.modified_request_example.method or "GET"
+    target = _find_target(tamp_list, want_path, want_method) or tamp_list[-1]
+    base_target = _find_target(base_list, want_path, want_method) or (
+        base_list[-1] if base_list else None
+    )
 
-    # 1) Hard rejection by status code.
+    t_status = target.status
+    b_status = base_target.status if base_target else None
+    signals: Dict[str, Any] = {
+        "target_status": t_status,
+        "baseline_status": b_status,
+    }
+
+    # 1) Hard rejection: the targeted request itself was refused.
     if t_status in _REJECT_STATUSES:
         return OracleResult(
             verdict=Verdict.REJECTED,
-            reason=f"Server rejected the tampered value with HTTP {t_status}.",
+            confidence=0.0,
+            reason=f"Server rejected the tampered request with HTTP {t_status}.",
             baseline_status=b_status,
             tampered_status=t_status,
+            signals=signals,
         )
 
-    # 2) Server error from unexpected input: notable but not a confirmed bypass.
-    if t_status is not None and t_status >= 500:
+    target_error = _looks_like_error(target)
+    signals["target_error_context"] = target_error
+
+    # 2) IDOR / authorization surface (id-like parameter or a path segment).
+    is_id_surface = finding.parameter_location.value == "url_path" or bool(
+        _ID_PARAM.search(finding.parameter_name)
+    )
+    if is_id_surface:
+        return _evaluate_idor(target, base_target, target_error, b_status, t_status, signals)
+
+    # 3) Value / business-logic surface.
+    return _evaluate_value(
+        finding,
+        tamper_value,
+        base_list,
+        tamp_list,
+        target,
+        target_error,
+        b_status,
+        t_status,
+        signals,
+    )
+
+
+def _evaluate_idor(target, base_target, target_error, b_status, t_status, signals):
+    # Access actively blocked at the application layer (2xx error envelope).
+    if target_error:
         return OracleResult(
-            verdict=Verdict.LIKELY,
+            verdict=Verdict.REJECTED,
+            confidence=0.0,
             reason=(
-                f"Tampered value triggered HTTP {t_status}; the input was not "
-                "validated cleanly, which often indicates weak server-side checks."
-            ),
-            baseline_status=b_status,
-            tampered_status=t_status,
-        )
-
-    # 3) Accepted (2xx/3xx). Look for evidence the value actually took effect.
-    reflected = _contains(tampered.body, tamper_value)
-    baseline_reflected = _contains(baseline.body, tamper_value) if baseline else False
-    signals["value_reflected"] = reflected
-    signals["reflected_in_baseline"] = baseline_reflected
-
-    # 3a) Numeric value-bearing parameter: did a total/price drop in the response?
-    if _VALUE_PARAMS.search(finding.parameter_name):
-        drop = _detect_value_drop(baseline, tampered, tamper_value)
-        if drop is not None:
-            signals.update(drop)
-            if drop.get("decreased"):
-                return OracleResult(
-                    verdict=Verdict.CONFIRMED,
-                    reason=(
-                        "A monetary/quantity figure in the response decreased after "
-                        f"tampering ({drop.get('from')} -> {drop.get('to')}), "
-                        "indicating the manipulated value was honoured server-side."
-                    ),
-                    baseline_status=b_status,
-                    tampered_status=t_status,
-                    signals=signals,
-                )
-
-    # 3b) Our injected value is reflected in the accepted response and was NOT
-    #     already present in the baseline -> the server took it.
-    if reflected and not baseline_reflected and t_status and t_status < 400:
-        return OracleResult(
-            verdict=Verdict.CONFIRMED,
-            reason=(
-                "The tampered value is reflected in an accepted (2xx) response and "
-                "was absent from the baseline, indicating it was accepted server-side."
+                "The alternate identifier was not served: the response carries an "
+                "error/denied context, so access control held."
             ),
             baseline_status=b_status,
             tampered_status=t_status,
             signals=signals,
         )
 
-    # 3c) Response changed meaningfully vs baseline but no direct value proof.
-    if baseline is not None:
-        delta = _body_delta(baseline, tampered)
-        signals["body_delta"] = delta
-        if delta is not None and delta >= 0.15:
+    if t_status is not None and 200 <= t_status < 400:
+        diff = _body_differs(base_target, target)
+        signals["body_diff_ratio"] = round(diff, 3)
+        # A different, non-trivial resource was returned for someone else's id.
+        if diff >= 0.10 and target and len((target.body or "").strip()) > 40:
             return OracleResult(
-                verdict=Verdict.LIKELY,
+                verdict=Verdict.CONFIRMED,
+                confidence=0.78,
                 reason=(
-                    "The tampered response differs substantially from the baseline "
-                    f"(~{int(delta * 100)}% change) with a 2xx status; manual "
-                    "confirmation recommended."
+                    "Requesting a different object identifier returned a distinct, "
+                    "non-error resource (IDOR): access control did not scope the "
+                    "object to the current user."
                 ),
                 baseline_status=b_status,
                 tampered_status=t_status,
                 signals=signals,
             )
+        # Accepted but response ~identical: value may have been ignored/normalised.
+        return OracleResult(
+            verdict=Verdict.INCONCLUSIVE,
+            confidence=0.30,
+            reason=(
+                "The alternate identifier was accepted (2xx) but the response is "
+                "nearly identical to the baseline; impact is unclear and warrants "
+                "an LLM judge or manual review."
+            ),
+            baseline_status=b_status,
+            tampered_status=t_status,
+            signals=signals,
+        )
 
-    # 4) Accepted but no distinguishing signal -> escalate to an LLM judge.
     return OracleResult(
         verdict=Verdict.INCONCLUSIVE,
-        reason=(
-            "The tampered request was accepted but no deterministic signal "
-            "confirms impact; an LLM judge or manual review is warranted."
-        ),
+        confidence=0.2,
+        reason=f"Inconclusive authorization outcome (HTTP {t_status}).",
         baseline_status=b_status,
         tampered_status=t_status,
         signals=signals,
     )
 
 
-def _detect_value_drop(
-    baseline: Optional[ResponseSnapshot],
-    tampered: ResponseSnapshot,
-    tamper_value: str,
-) -> Optional[Dict[str, Any]]:
-    """Compare the max numeric figure in baseline vs tampered JSON responses.
+def _evaluate_value(
+    finding,
+    tamper_value,
+    base_list,
+    tamp_list,
+    target,
+    target_error,
+    b_status,
+    t_status,
+    signals,
+):
+    accepted = t_status is not None and 200 <= t_status < 400 and not target_error
 
-    A decrease in the largest monetary-looking number is a strong signal that a
-    price/quantity tamper was honoured.
-    """
-    if baseline is None:
-        return None
-    b_json, t_json = baseline.json_body(), tampered.json_body()
-    if b_json is None or t_json is None:
-        return None
-    b_max = _max_number(b_json)
-    t_max = _max_number(t_json)
-    if b_max is None or t_max is None:
-        return None
-    return {
-        "from": b_max,
-        "to": t_max,
-        "decreased": t_max < b_max,
-    }
+    changes = _monetary_changes(base_list, tamp_list)
+    signals["monetary_changes"] = changes
+    reflected = _reflected_in_success(tamp_list, base_list, tamper_value)
+    signals["value_reflected_in_success"] = reflected
 
+    confidence = 0.0
+    reasons: List[str] = []
 
-def _max_number(obj: Any) -> Optional[float]:
-    """Largest numeric leaf in a JSON structure (proxy for an order total)."""
-    best: Optional[float] = None
-    stack = [obj]
-    while stack:
-        cur = stack.pop()
-        if isinstance(cur, dict):
-            stack.extend(cur.values())
-        elif isinstance(cur, list):
-            stack.extend(cur)
+    # Strongest signal: a monetary total actually changed between the two runs.
+    if changes:
+        c = changes[0]
+        if accepted:
+            confidence = max(confidence, 0.85)
         else:
-            n = _numeric(cur)
-            if n is not None and (best is None or n > best):
-                best = n
-    return best
+            confidence = max(confidence, 0.55)
+        direction = "decreased" if c["decreased"] else "increased"
+        reasons.append(
+            f"monetary field '{c['field']}' {direction} {c['from']} -> {c['to']} "
+            f"between baseline and tampered runs"
+        )
+
+    # Injected value accepted and reflected in a non-error response.
+    if reflected and accepted:
+        confidence = max(confidence, 0.72)
+        reasons.append("the injected value is reflected in an accepted, non-error response")
+
+    # Server error from the tampered input: weak validation, notable but not proof.
+    if t_status is not None and t_status >= 500:
+        confidence = max(confidence, 0.45)
+        reasons.append(f"the tampered value triggered HTTP {t_status} (weak input validation)")
+
+    # A clear body change with a clean 2xx but no direct field proof.
+    if accepted and not changes and not reflected:
+        diff = _body_differs(_target_in(base_list, finding), target)
+        signals["body_diff_ratio"] = round(diff, 3)
+        if diff >= 0.15:
+            confidence = max(confidence, 0.45)
+            reasons.append(f"the tampered response differs ~{int(diff * 100)}% from baseline")
+
+    # A 2xx carrying an error/denied envelope is an application-level rejection
+    # (distinct from a 5xx, which is weak-validation evidence handled above).
+    is_server_error = t_status is not None and t_status >= 500
+    if target_error and not changes and not reflected and not is_server_error:
+        return OracleResult(
+            verdict=Verdict.REJECTED,
+            confidence=0.0,
+            reason=(
+                "The tampered value was accepted transport-wise but the response "
+                "carries an error/denied context, so it was not honoured."
+            ),
+            baseline_status=b_status,
+            tampered_status=t_status,
+            signals=signals,
+        )
+
+    verdict = _verdict_for(confidence)
+    reason = _compose_reason(verdict, reasons)
+    return OracleResult(
+        verdict=verdict,
+        confidence=round(confidence, 2),
+        reason=reason,
+        baseline_status=b_status,
+        tampered_status=t_status,
+        signals=signals,
+    )
 
 
-def _body_delta(baseline: ResponseSnapshot, tampered: ResponseSnapshot) -> Optional[float]:
-    """Rough normalised size/character delta between two bodies (0..1)."""
-    a, b = baseline.body or "", tampered.body or ""
-    if not a and not b:
-        return 0.0
-    longest = max(len(a), len(b)) or 1
-    return abs(len(a) - len(b)) / longest
+def _target_in(base_list, finding):
+    want_path = urllib.parse.urlparse(finding.modified_request_example.url).path
+    want_method = finding.modified_request_example.method or "GET"
+    return _find_target(base_list, want_path, want_method) or (base_list[-1] if base_list else None)
+
+
+def _verdict_for(confidence: float) -> Verdict:
+    if confidence >= _CONFIRM_AT:
+        return Verdict.CONFIRMED
+    if confidence >= _LIKELY_AT:
+        return Verdict.LIKELY
+    return Verdict.INCONCLUSIVE
+
+
+def _compose_reason(verdict: Verdict, reasons: List[str]) -> str:
+    if not reasons:
+        return (
+            "The tampered request was accepted but no deterministic signal confirms "
+            "impact; escalate to an LLM judge or review manually."
+        )
+    joined = "; ".join(reasons)
+    if verdict == Verdict.CONFIRMED:
+        return f"Live issue confirmed: {joined}."
+    if verdict == Verdict.LIKELY:
+        return f"Likely exploitable: {joined}; confirmation recommended."
+    return f"Weak signal only: {joined}; inconclusive."

@@ -3,10 +3,14 @@
 Ties the (cheap) deterministic oracle to the replay engine. For a given
 finding it:
 
-1. replays the recorded flow **untampered** and captures the target response
+1. replays the recorded flow **untampered** and captures every response
    (baseline),
-2. replays it **tampered** and captures the target response,
-3. asks the oracle to compare them.
+2. replays it **tampered** and captures every response,
+3. asks the oracle to compare the two whole flows.
+
+Capturing the whole flow (not just the targeted request) is what lets the
+oracle see downstream proof -- e.g. a checkout total that only reflects a
+tampered price on the confirmation step.
 
 The LLM is not in this loop at all -- the whole verification is tokens-free.
 Only an ``INCONCLUSIVE`` verdict should be escalated to an LLM judge by the
@@ -15,8 +19,7 @@ caller, which keeps autonomous runs close to one-shot cost.
 
 from __future__ import annotations
 
-import urllib.parse
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from core.models import Finding, FindingResult, OracleResult, Verdict
 from core.oracle import ResponseSnapshot, evaluate
@@ -45,10 +48,38 @@ def _snapshot(resp: Optional[Dict[str, Any]]) -> Optional[ResponseSnapshot]:
         return None
     return ResponseSnapshot(
         url=resp.get("url", ""),
+        method=resp.get("method"),
         status=resp.get("status"),
         headers={str(k): str(v) for k, v in (resp.get("headers") or {}).items()},
         body=resp.get("body", "") or "",
     )
+
+
+def _snapshots(responses: Optional[List[Dict[str, Any]]]) -> List[ResponseSnapshot]:
+    out: List[ResponseSnapshot] = []
+    for r in responses or []:
+        snap = _snapshot(r)
+        if snap is not None:
+            out.append(snap)
+    return out
+
+
+def capture_baseline(
+    finding: Finding,
+    actions_file: str,
+    redactor=None,
+    debug: bool = False,
+    headless: bool = True,
+) -> List[Dict[str, Any]]:
+    """Replay the flow once, untampered, and return the captured responses.
+
+    The baseline is identical for every finding on the same recording, so it is
+    captured once and reused across findings (N+1 replays instead of 2N).
+    """
+    from phases.phase4_replay_flow import run_replay_capture
+
+    tamper = finding_to_tamper(finding, redactor)
+    return run_replay_capture(actions_file, [], tamper, debug=debug, headless=headless)
 
 
 def verify_finding(
@@ -57,8 +88,13 @@ def verify_finding(
     redactor=None,
     debug: bool = False,
     headless: bool = True,
+    baseline: Optional[List[Dict[str, Any]]] = None,
 ) -> FindingResult:
-    """Run baseline + tampered replays and evaluate the outcome."""
+    """Run a tampered replay and evaluate it against a baseline.
+
+    If ``baseline`` (captured responses from an untampered run) is provided it
+    is reused; otherwise a fresh baseline is captured for this finding.
+    """
     # Lazy import so core.verifier is importable without Playwright present
     # (e.g. for unit tests of the oracle wiring).
     from phases.phase4_replay_flow import run_replay_capture
@@ -66,9 +102,8 @@ def verify_finding(
     tamper = finding_to_tamper(finding, redactor)
 
     try:
-        baseline = run_replay_capture(
-            actions_file, [], tamper, debug=debug, headless=headless
-        )
+        if baseline is None:
+            baseline = run_replay_capture(actions_file, [], tamper, debug=debug, headless=headless)
         tampered = run_replay_capture(
             actions_file, [tamper], tamper, debug=debug, headless=headless
         )
@@ -84,7 +119,7 @@ def verify_finding(
     oracle = evaluate(
         finding,
         str(finding.test_payload),
-        _snapshot(baseline),
-        _snapshot(tampered),
+        _snapshots(baseline),
+        _snapshots(tampered),
     )
     return FindingResult(finding=finding, oracle=oracle)

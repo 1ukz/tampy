@@ -22,6 +22,37 @@
 
 - **Phase 4: Control testing & replay**  
   Lets you modify a specific packet and replay the full flow in a headed browser to validate tampering.
+  It can also run an **automated verification** pass that replays each finding and tells you, with a
+  confidence score, whether the issue is actually **live**.
+
+---
+
+## 🎯 How TAMPY decides if an issue is live
+
+Phase 4's verifier replays the recorded purchase flow twice — once **untampered**
+(baseline) and once **tampered** — captures every same-origin response from both
+runs, and a deterministic oracle compares them. No LLM tokens are spent on
+verification; the model only proposes hypotheses in Phase 3.
+
+The oracle is built for **precision**, not just "did something change":
+
+| Signal | Example | Verdict |
+|---|---|---|
+| A **monetary field** (same JSON key) changed between runs | `grand_total` 250.00 → 2.50 on the confirmation step | **LIVE (confirmed)** |
+| Injected value **reflected** in an accepted, non-error response | coupon `FREE` echoed in a 2xx order object | **LIVE / likely** |
+| A **different resource** returned for another object id | `/account/1002` returns someone else's data | **LIVE (IDOR)** |
+| Targeted request **rejected** | HTTP 403 / `{"success": false}` | **rejected** |
+| Accepted but no distinguishing signal | identical 2xx body | **inconclusive** → optional LLM judge |
+
+Key precision guards: it compares the **same field** across the two flows
+(not "the largest number", which IDs and timestamps fool), observes
+**downstream** responses (the proof often lands at checkout, not at the tampered
+request), and treats a value echoed inside an **error envelope** as a rejection,
+not a hit — which removes the main class of false positives. Each verdict
+carries a confidence and names the exact evidence.
+
+The baseline is captured **once** and reused across findings, so a full
+assessment costs *N+1* replays rather than *2N*.
 
 ---
 

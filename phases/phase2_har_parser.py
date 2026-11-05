@@ -1,6 +1,7 @@
 import json
-from resources.bcolors import bcolors
+
 from core.redaction import Redactor
+from resources.bcolors import bcolors
 
 
 def redact_filtered(filtered_path, domain):
@@ -18,7 +19,7 @@ def redact_filtered(filtered_path, domain):
         redacted_path = filtered_path.replace(".json", "_redacted.json")
         map_path = filtered_path.replace(".json", "_secretmap.json")
 
-        with open(filtered_path, "r", encoding="utf-8") as f:
+        with open(filtered_path, encoding="utf-8") as f:
             packets = json.load(f)
 
         redactor = Redactor()
@@ -37,12 +38,8 @@ def redact_filtered(filtered_path, domain):
                 f"LLM egress ({summary}).{bcolors.ENDC}"
             )
         else:
-            print(
-                f"{bcolors.OKBLUE}[INFO]: No secrets detected to redact.{bcolors.ENDC}"
-            )
-        print(
-            f"{bcolors.OKBLUE}[INFO]: Redacted packets written to {redacted_path}.{bcolors.ENDC}"
-        )
+            print(f"{bcolors.OKBLUE}[INFO]: No secrets detected to redact.{bcolors.ENDC}")
+        print(f"{bcolors.OKBLUE}[INFO]: Redacted packets written to {redacted_path}.{bcolors.ENDC}")
         return redacted_path, map_path
     except Exception as e:
         print(f"{bcolors.FAIL}[ERROR]: Failed to redact packets: {e}{bcolors.ENDC}")
@@ -51,7 +48,7 @@ def redact_filtered(filtered_path, domain):
 
 def parse_har(har_path, filtered_path, domain):
     try:
-        with open(har_path, "r", encoding="utf-8") as f:
+        with open(har_path, encoding="utf-8") as f:
             har = json.load(f)
         entries = har.get("log", {}).get("entries", [])
 
