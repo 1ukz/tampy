@@ -5,6 +5,8 @@
 
 **TAMPY** is a command-line tool designed to perform security assessments of e-commerce websites. It automates technology enumeration, HTTP packet recording, AI-driven analysis, and replay testing of tampered requests in order to test the business logic, architecture and purchase-flow security.
 
+The CLI ships with a themed, animated interface (gradient banner, boot checklist, live status icons and progress) that degrades gracefully when output is piped or non-interactive. Disable the intro animation with `--no-anim`, or all colour with the standard `NO_COLOR` environment variable.
+
 ---
 
 ## 📝 Structure

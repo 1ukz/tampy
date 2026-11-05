@@ -6,6 +6,7 @@ import urllib.parse
 
 from core.models import Finding
 from phases.phase4_replay_flow import replay_actions_with_tamper
+from resources import ui
 from resources.bcolors import bcolors
 from resources.yes_no_menu import yes_no_menu
 
@@ -40,18 +41,6 @@ def _mod_req_dict(finding, redactor, actual_domain):
         mod_req = redactor.reinject(mod_req)
     mod_req = replace_domain(mod_req, actual_domain)
     return mod_req
-
-
-def _verdict_colour(verdict):
-    from core.models import Verdict
-
-    return {
-        Verdict.CONFIRMED: bcolors.FAIL,  # confirmed issue == red (bad for target)
-        Verdict.LIKELY: bcolors.WARNING,
-        Verdict.INCONCLUSIVE: bcolors.OKBLUE,
-        Verdict.REJECTED: bcolors.OKGREEN,  # server defended == green
-        Verdict.ERROR: bcolors.WARNING,
-    }.get(verdict, bcolors.ENDC)
 
 
 def run_automated_verification(
@@ -116,12 +105,19 @@ def run_automated_verification(
             )
         results.append(fr)
         if fr.oracle:
-            col = _verdict_colour(fr.oracle.verdict)
             conf = fr.oracle.confidence
-            print(
-                f"  {col}-> {fr.oracle.verdict.value.upper()}{bcolors.ENDC} "
-                f"(confidence {conf:.0%}): {fr.oracle.reason}"
-            )
+            v = fr.oracle.verdict
+            line = f"({conf:.0%}) {fr.oracle.reason}"
+            if v == Verdict.CONFIRMED:
+                ui.hit(f"LIVE {line}")
+            elif v == Verdict.LIKELY:
+                ui.warn(f"LIKELY {line}")
+            elif v == Verdict.REJECTED:
+                ui.ok(f"DEFENDED {line}")
+            elif v == Verdict.ERROR:
+                ui.err(line)
+            else:
+                ui.info(f"INCONCLUSIVE {line}")
 
     _print_verification_summary(results, Verdict)
     return results
@@ -144,20 +140,28 @@ def _print_verification_summary(results, Verdict):
     live = sum(1 for _, fr in ranked if fr.oracle and fr.oracle.verdict == Verdict.CONFIRMED)
     likely = sum(1 for _, fr in ranked if fr.oracle and fr.oracle.verdict == Verdict.LIKELY)
 
-    print(f"\n{bcolors.BOLD}{bcolors.HEADER}VERIFICATION SUMMARY{bcolors.ENDC}")
-    print(
-        f"{bcolors.BOLD}  {bcolors.FAIL}{live} LIVE{bcolors.ENDC}{bcolors.BOLD} / "
-        f"{bcolors.WARNING}{likely} likely{bcolors.ENDC}{bcolors.BOLD} / "
-        f"{len(results)} total{bcolors.ENDC}"
+    ui.section("Verification Summary", "Confirmed issues first")
+    headline = (
+        f"{ui.paint(str(live) + ' LIVE', ui.C_ERR, bold=True)}  ·  "
+        f"{ui.paint(str(likely) + ' likely', ui.C_WARN, bold=True)}  ·  "
+        f"{ui.paint(str(len(results)) + ' total', ui.C_MUTE)}"
     )
+    print(f"  {headline}\n")
     for idx, fr in ranked:
         v = fr.oracle.verdict if fr.oracle else None
-        col = _verdict_colour(v)
         conf = f"{fr.oracle.confidence:.0%}" if fr.oracle else "n/a"
         label = "LIVE" if v == Verdict.CONFIRMED else (v.value.upper() if v else "N/A")
+        color = {
+            Verdict.CONFIRMED: ui.C_ERR,
+            Verdict.LIKELY: ui.C_WARN,
+            Verdict.REJECTED: ui.C_OK,
+            Verdict.INCONCLUSIVE: ui.C_ACCENT,
+            Verdict.ERROR: ui.C_WARN,
+        }.get(v, ui.C_MUTE)
+        tag = ui.paint(f"{label:<12}", color, bold=(v == Verdict.CONFIRMED))
         print(
-            f"  [{idx}] {col}{label:<12}{bcolors.ENDC} {conf:>4}  "
-            f"control={fr.finding.control_id} "
+            f"  [{idx}] {tag} {ui.paint(conf.rjust(4), ui.C_ACCENT)}  "
+            f"{ui.paint('control=' + fr.finding.control_id, ui.C_MUTE)} "
             f"param={fr.finding.parameter_name} ({fr.finding.parameter_location.value})"
         )
 

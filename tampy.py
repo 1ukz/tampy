@@ -33,6 +33,7 @@ from phases.phase2_session_recorder_pw import (
 )  # noqa: E402
 from phases.phase3_ai_analyzer import analyze_packets_with_ai, print_ai_answer  # noqa: E402
 from phases.phase4_control_testing import edit_packet  # noqa: E402
+from resources import ui  # noqa: E402
 from resources.bcolors import bcolors  # noqa: E402
 from resources.yes_no_menu import yes_no_menu  # noqa: E402
 
@@ -88,7 +89,7 @@ def phase_1(url_input, webtechs_dir):
 
 
 def phase_2(url_input, packets_dir, actions_path, debug):
-    print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 2]: USER SESSION RECORDING{bcolors.ENDC}")
+    ui.section("Phase 2 · User Session Recording", "Record the purchase flow you want to test")
 
     # Compute prefix for filenames
     parsed = urllib.parse.urlparse(url_input)
@@ -156,10 +157,11 @@ def phase_2(url_input, packets_dir, actions_path, debug):
 
 def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
     stream_mode = "streaming" if streaming else "non-streaming"
-    print(
-        f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 3]: ANALYZING HTTP PACKETS ({mode} {stream_mode} mode){bcolors.ENDC}"
+    ui.section(
+        "Phase 3 · AI-Powered Packet Analysis",
+        f"{mode} · {stream_mode}",
     )
-    time.sleep(0.5)
+    time.sleep(0.3)
     print(
         f"{bcolors.OKBLUE}[INFO]: Evaluating the following controls: {bcolors.ENDC}\n\n"
         + control_references()
@@ -222,13 +224,11 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
 
 
 def phase_4(url_input, json_result, actions_file, map_file, mode, debug):
-    print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 4]: CONTROL TESTING{bcolors.ENDC}")
+    ui.section("Phase 4 · Control Testing & Verification", "Tamper, replay and confirm live issues")
     edit_packet(url_input, json_result, actions_file, map_file, mode, debug)
 
 
 def startup():
-    print(f"{bcolors.BOLD}{bcolors.OKBLUE}[INFO]: Welcome to TAMPY v1.0!{bcolors.ENDC}\n")
-
     load_dotenv()
 
     logs_dir = ".logs"
@@ -277,7 +277,15 @@ def load_args():
         action="store_true",
         help="Debug mode to print extra information (default: false)",
     )
+    parser.add_argument(
+        "--no-anim",
+        action="store_true",
+        help="Disable startup animations (colour is kept)",
+    )
     args = parser.parse_args()
+
+    if args.no_anim:
+        os.environ["TAMPY_NO_ANIM"] = "1"
 
     mode = "local" if args.local else "remote"
     streaming = bool(args.stream)
@@ -377,8 +385,10 @@ def main():
             break
         another_url = True
 
-    print(f"{bcolors.BOLD}{bcolors.OKCYAN}\nGoodbye! Thank you for using TAMPY :){bcolors.ENDC}")
-    print(f"{bcolors.OKBLUE}[INFO]: Exiting now...{bcolors.ENDC}")
+    print()
+    print(ui.rule())
+    ui.ok("Thank you for using TAMPY. Stay sharp, hack ethically.")
+    print()
 
 
 if __name__ == "__main__":

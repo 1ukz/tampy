@@ -18,7 +18,9 @@ except Exception:
 
 
 def url_menu(url_skip_prompt, another_url):
-    print(f"{bcolors.BOLD}{bcolors.HEADER}[PHASE 1]: WEB TECHNOLOGIES ENUMERATION{bcolors.ENDC}")
+    from resources import ui
+
+    ui.section("Phase 1 · Web Technologies Enumeration", "Fingerprint the target stack")
     url_input = ""
 
     if (
