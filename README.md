@@ -1,4 +1,4 @@
-# TAMPY v1.0
+# TAMPY v2.0
 <br>
 <img src="https://github.com/user-attachments/assets/71003213-54e5-46ac-8301-029e359bb376" alt="TAMPY screenshot" width="450"/>
 <br><br>
