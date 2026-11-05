@@ -22,6 +22,67 @@
 
 - **Phase 4: Control testing & replay**  
   Lets you modify a specific packet and replay the full flow in a headed browser to validate tampering.
+  It can also run an **automated verification** pass that replays each finding and tells you, with a
+  confidence score, whether the issue is actually **live**.
+
+---
+
+## 🎯 How TAMPY decides if an issue is live
+
+Phase 4's verifier replays the recorded purchase flow twice — once **untampered**
+(baseline) and once **tampered** — captures every same-origin response from both
+runs, and a deterministic oracle compares them. No LLM tokens are spent on
+verification; the model only proposes hypotheses in Phase 3.
+
+The oracle is built for **precision**, not just "did something change":
+
+| Signal | Example | Verdict |
+|---|---|---|
+| **Payment-gateway charge amount** changed between runs | Redsys `DS_MERCHANT_AMOUNT` 250.00 → 0.01 | **LIVE (confirmed, 0.97)** |
+| A **monetary field** (same JSON key) changed between runs | `grand_total` 250.00 → 2.50 on the confirmation step | **LIVE (confirmed)** |
+| Injected value **reflected** in an accepted, non-error response | coupon `FREE` echoed in a 2xx order object | **LIVE / likely** |
+| A **different resource** returned for another object id | `/account/1002` returns someone else's data | **LIVE (IDOR)** |
+| Targeted request **rejected** | HTTP 403 / `{"success": false}` | **rejected** |
+| Accepted but no distinguishing signal | identical 2xx body | **inconclusive** → optional LLM judge |
+
+**Payload sweeps.** The model proposes one payload per finding, but TAMPY also
+tries a small, deterministic set per parameter kind (price: `0.01`, `0`, `-1`;
+quantity: `-1`, `0`, `9999`; …) at **zero extra LLM cost**, stopping at the
+first confirmed hit. The model's own payload is always tried first.
+
+**Fast HTTP replay.** For a quick sweep, TAMPY can resend the targeted request
+directly over HTTP (reusing the session captured by one browser run) instead of
+driving the full UI each time — much faster. Browser replay stays the default
+when full-flow / payment-gateway proof is needed.
+
+**Signature / integrity awareness (Control 1.5).** TAMPY detects
+signature/HMAC fields (e.g. Redsys `Ds_Signature`) on the tampered request and
+sharpens the verdict accordingly: a rejection next to a signature reads as
+*integrity-protected*, while a **confirmed** tamper next to a signature is
+flagged as *"the signature does not cover the manipulated parameter"* — a
+finding in its own right.
+
+**Payment gateways.** Purchase flows hand off to an external gateway
+("pasarela de pago") — Redsys, Stripe, PayPal, Adyen, and others. TAMPY keeps
+those cross-origin requests during replay and decodes the charge amount
+(including Redsys's base64 `Ds_MerchantParameters` blob). A changed amount at
+the gateway is the most decisive proof of a live price manipulation, because it
+is the money the customer is actually charged.
+
+**LLM judge (optional).** The deterministic oracle resolves almost everything
+for free. Only the genuinely `inconclusive` cases can be escalated — one cheap
+LLM call each, with a small, **redacted** evidence bundle — to get a final
+confirmed / rejected ruling. Everything else spends zero tokens.
+
+Key precision guards: it compares the **same field** across the two flows
+(not "the largest number", which IDs and timestamps fool), observes
+**downstream** responses (the proof often lands at checkout, not at the tampered
+request), and treats a value echoed inside an **error envelope** as a rejection,
+not a hit — which removes the main class of false positives. Each verdict
+carries a confidence and names the exact evidence.
+
+The baseline is captured **once** and reused across findings, so a full
+assessment costs *N+1* replays rather than *2N*.
 
 ---
 

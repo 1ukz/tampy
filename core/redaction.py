@@ -206,15 +206,21 @@ class Redactor:
     def redact_packets(self, packets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return [self.redact_packet(pkt) for pkt in packets]
 
+    def redact_text(self, value: str) -> str:
+        """Redact secrets from an arbitrary string (e.g. a response-body excerpt
+        before it is sent to the LLM judge). Applies the value-pattern rules
+        (JWT, bearer, email, card); does not attempt cookie-header parsing."""
+        if not isinstance(value, str) or not value:
+            return value
+        return self._redact_string(value)
+
     # -- re-injection ------------------------------------------------------
     def reinject(self, obj: Any) -> Any:
         """Recursively replace placeholders with their original values."""
         if isinstance(obj, str):
             if "__TAMPY_" not in obj:
                 return obj
-            return PLACEHOLDER_RE.sub(
-                lambda m: self._to_original.get(m.group(0), m.group(0)), obj
-            )
+            return PLACEHOLDER_RE.sub(lambda m: self._to_original.get(m.group(0), m.group(0)), obj)
         if isinstance(obj, dict):
             return {k: self.reinject(v) for k, v in obj.items()}
         if isinstance(obj, list):
@@ -231,22 +237,20 @@ class Redactor:
             json.dump(self._to_original, f, indent=2)
 
     @classmethod
-    def load_map(cls, path: str) -> "Redactor":
+    def load_map(cls, path: str) -> Redactor:
         inst = cls()
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             inst._to_original = json.load(f)
         inst._to_placeholder = {v: k for k, v in inst._to_original.items()}
         return inst
 
 
-def redact_packets_file(
-    in_path: str, out_path: str, map_path: str
-) -> Tuple[str, Dict[str, int]]:
+def redact_packets_file(in_path: str, out_path: str, map_path: str) -> Tuple[str, Dict[str, int]]:
     """Redact a filtered-packets JSON file to a new file, saving the map.
 
     Returns the output path and the redaction report (counts per category).
     """
-    with open(in_path, "r", encoding="utf-8") as f:
+    with open(in_path, encoding="utf-8") as f:
         packets = json.load(f)
     redactor = Redactor()
     redacted = redactor.redact_packets(packets)

@@ -1,10 +1,12 @@
+import os
 import re
 import urllib.parse
-import os
-from wappalyzer import analyze
-from resources.bcolors import bcolors
+
 import requests
-from requests.exceptions import SSLError, HTTPError
+from requests.exceptions import HTTPError, SSLError
+from wappalyzer import analyze
+
+from resources.bcolors import bcolors
 
 try:
     # verify=False in verify_website_exists would otherwise spam warnings.
@@ -16,9 +18,7 @@ except Exception:
 
 
 def url_menu(url_skip_prompt, another_url):
-    print(
-        f"{bcolors.BOLD}{bcolors.HEADER}[PHASE 1]: WEB TECHNOLOGIES ENUMERATION{bcolors.ENDC}"
-    )
+    print(f"{bcolors.BOLD}{bcolors.HEADER}[PHASE 1]: WEB TECHNOLOGIES ENUMERATION{bcolors.ENDC}")
     url_input = ""
 
     if (
@@ -27,14 +27,10 @@ def url_menu(url_skip_prompt, another_url):
         or url_skip_prompt == "https://127.0.0.1:5000/"
     ):
         url_input = url_skip_prompt.strip()
-        print(
-            f"{bcolors.BOLD}{bcolors.OKGREEN} Using the provided URL: {url_input} {bcolors.ENDC}"
-        )
+        print(f"{bcolors.BOLD}{bcolors.OKGREEN} Using the provided URL: {url_input} {bcolors.ENDC}")
         another_url = True
     else:
-        url_input = input(
-            f"{bcolors.BOLD}Enter the URL to analyze: {bcolors.ENDC}"
-        ).strip()
+        url_input = input(f"{bcolors.BOLD}Enter the URL to analyze: {bcolors.ENDC}").strip()
 
     if not (url_input.startswith("http://") or url_input.startswith("https://")):
         pattern = re.compile(r"^([a-z0-9-]+\.)+[a-z]{2,}$", re.IGNORECASE)
@@ -56,7 +52,7 @@ def parse_existing_file_for_ecommerce(filename):
     if not os.path.exists(filename):
         return False
     ecom_detected = False
-    with open(filename, "r", encoding="utf-8") as f:
+    with open(filename, encoding="utf-8") as f:
         for line in f:
             if "e-commerce:" in line.lower():
                 ecom_detected = True
@@ -109,9 +105,7 @@ def scan_url(url_input, spinner):
         return results
     except Exception as e:
         spinner.stop()
-        print(
-            f"{bcolors.FAIL}[ERROR]: Technology enumeration failed: {e}{bcolors.ENDC}"
-        )
+        print(f"{bcolors.FAIL}[ERROR]: Technology enumeration failed: {e}{bcolors.ENDC}")
         # Signal failure distinctly so the caller does NOT treat it as
         # "an e-commerce platform was found" and silently abort the run.
         raise ScanError(str(e)) from e
@@ -136,7 +130,7 @@ def check_ecommerce_platforms(results, spinner):
         "Weebly",
     ]
     found = {}
-    for analyzed_url, techs in results.items():
+    for techs in results.values():
         for tech, details in techs.items():
             for platform in commerce_platforms:
                 if platform.lower() in tech.lower():
@@ -159,7 +153,7 @@ def check_ecommerce_platforms(results, spinner):
 
 def get_pretty_output(results, found, items_per_row=3):
     grouped = {}
-    for url, techs in results.items():
+    for techs in results.values():
         for tech, details in techs.items():
             for cat in details.get("categories", []):
                 grouped.setdefault(cat, []).append(tech)

@@ -1,7 +1,8 @@
-import subprocess
-import signal
 import os
+import signal
+import subprocess
 import time
+
 from resources.bcolors import bcolors
 
 # Global flag to control the recording loop
@@ -54,9 +55,7 @@ def record_user_session(url, har_path, actions_path):
     # Set the custom signal handler for SIGINT (Ctrl+C)
     signal.signal(signal.SIGINT, handler)
 
-    print(
-        f"{bcolors.BOLD}{bcolors.WARNING}Press Ctrl+C to stop recording...{bcolors.ENDC}"
-    )
+    print(f"{bcolors.BOLD}{bcolors.WARNING}Press Ctrl+C to stop recording...{bcolors.ENDC}")
     # Keep the script running until Ctrl+C is pressed
     while not stop_recording:
         time.sleep(1)

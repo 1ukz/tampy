@@ -1,5 +1,6 @@
 import json
 import warnings
+
 from phases.phase2_har_parser import parse_har, redact_filtered
 from resources.animate_title import animate_title
 from resources.control_refs import control_references
@@ -9,21 +10,23 @@ warnings.filterwarnings(
 )
 
 # noqa: E402
+import argparse  # noqa: E402
 import os  # noqa: E402
 import time  # noqa: E402
 import urllib.parse  # noqa: E402
-import argparse  # noqa: E402
+
 from dotenv import load_dotenv  # noqa: E402
 from halo import Halo  # noqa: E402
+
 from phases.phase1_webtech_rec import (  # noqa: E402
-    scan_url,
     ScanError,
     check_ecommerce_platforms,
     get_pretty_output,
+    parse_existing_file_for_ecommerce,
     save_results_to_file,
+    scan_url,
     url_menu,
     verify_website_exists,
-    parse_existing_file_for_ecommerce,
 )
 from phases.phase2_session_recorder_pw import (
     record_user_session as record_user_session_pw,
@@ -57,9 +60,7 @@ def phase_1(url_input, webtechs_dir):
             ecommerce_found = parse_existing_file_for_ecommerce(filename)
             return ecommerce_found, prefix
 
-    spinner = Halo(
-        text="Scanning web technologies... Please wait patiently.", spinner="dots"
-    )
+    spinner = Halo(text="Scanning web technologies... Please wait patiently.", spinner="dots")
     spinner.start()
     try:
         results = scan_url(url_input, spinner)
@@ -82,16 +83,12 @@ def phase_1(url_input, webtechs_dir):
     platforms_found, ecommerce_found = check_ecommerce_platforms(results, spinner)
     pretty = get_pretty_output(results, platforms_found, items_per_row=3)
     save_results_to_file(url_input, pretty, webtechs_dir)
-    print(
-        f"{bcolors.OKGREEN}[SUCCESS]: Webtechs log saved to: {filename}{bcolors.ENDC}"
-    )
+    print(f"{bcolors.OKGREEN}[SUCCESS]: Webtechs log saved to: {filename}{bcolors.ENDC}")
     return ecommerce_found, prefix
 
 
 def phase_2(url_input, packets_dir, actions_path, debug):
-    print(
-        f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 2]: USER SESSION RECORDING{bcolors.ENDC}"
-    )
+    print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 2]: USER SESSION RECORDING{bcolors.ENDC}")
 
     # Compute prefix for filenames
     parsed = urllib.parse.urlparse(url_input)
@@ -106,14 +103,8 @@ def phase_2(url_input, packets_dir, actions_path, debug):
     map_file = os.path.join(packets_dir, f"{prefix}_packets_secretmap.json")
     actions_filename = os.path.join(actions_path, f"{prefix}_actions.py")
     # Check if HAR and actions files already exist
-    if (
-        os.path.exists(har_file)
-        and os.path.exists(har_raw)
-        and os.path.exists(actions_filename)
-    ):
-        print(
-            f"{bcolors.OKBLUE}[INFO]: Existing session files found for this URL.{bcolors.ENDC}"
-        )
+    if os.path.exists(har_file) and os.path.exists(har_raw) and os.path.exists(actions_filename):
+        print(f"{bcolors.OKBLUE}[INFO]: Existing session files found for this URL.{bcolors.ENDC}")
         if yes_no_menu(
             f"{bcolors.BOLD}Do you want to use the existing HAR and actions files and skip recording? (y/n): {bcolors.ENDC}"
         ):
@@ -135,9 +126,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
             return redacted_file, actions_file, map_file
 
     # 1) Record user session with Playwright
-    har_filename_raw, actions_file = record_user_session_pw(
-        url_input, har_raw, actions_filename
-    )
+    har_filename_raw, actions_file = record_user_session_pw(url_input, har_raw, actions_filename)
 
     # Check if we got valid paths
     if not har_filename_raw or not actions_file:
@@ -154,9 +143,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
     # 2) Parse, filter and redact HAR into JSON
     har_filename_filtered = redacted = secret_map = None
     if har_filename_raw and actions_file:
-        har_filename_filtered, redacted, secret_map = parse_har(
-            har_filename_raw, har_file, domain
-        )
+        har_filename_filtered, redacted, secret_map = parse_har(har_filename_raw, har_file, domain)
 
     if not har_filename_filtered or not redacted or not secret_map:
         print(
@@ -189,11 +176,9 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
         if yes_no_menu(
             f"{bcolors.BOLD}Do you want to use the existing analysis file and skip AI analysis? (y/n): {bcolors.ENDC}"
         ):
-            print(
-                f"{bcolors.OKBLUE}[INFO]: Using existing analysis file.{bcolors.ENDC}"
-            )
+            print(f"{bcolors.OKBLUE}[INFO]: Using existing analysis file.{bcolors.ENDC}")
             time.sleep(0.5)
-            with open(analysis_filename, "r", encoding="utf-8") as f:
+            with open(analysis_filename, encoding="utf-8") as f:
                 cached = json.load(f)
             from core.models import parse_findings
 
@@ -223,33 +208,26 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
         print(raw_result or f"{bcolors.FAIL}(no raw text captured){bcolors.ENDC}")
         return None
 
-    print(
-        f"\n{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: ANALYSIS RESULTS: {bcolors.ENDC}\n"
-    )
+    print(f"\n{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: ANALYSIS RESULTS: {bcolors.ENDC}\n")
     print_ai_answer(result)
 
     with open(analysis_filename, "w", encoding="utf-8") as f:
         serialisable = [
-            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
-            for item in result
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item for item in result
         ]
         json.dump(serialisable, f, indent=2)
-    print(
-        f"{bcolors.OKBLUE}[INFO]: Analysis results saved to: {analysis_filename}{bcolors.ENDC}"
-    )
+    print(f"{bcolors.OKBLUE}[INFO]: Analysis results saved to: {analysis_filename}{bcolors.ENDC}")
 
     return result
 
 
-def phase_4(url_input, json_result, actions_file, map_file, debug):
+def phase_4(url_input, json_result, actions_file, map_file, mode, debug):
     print(f"{bcolors.BOLD}{bcolors.HEADER}\n[PHASE 4]: CONTROL TESTING{bcolors.ENDC}")
-    edit_packet(url_input, json_result, actions_file, map_file, debug)
+    edit_packet(url_input, json_result, actions_file, map_file, mode, debug)
 
 
 def startup():
-    print(
-        f"{bcolors.BOLD}{bcolors.OKBLUE}[INFO]: Welcome to TAMPY v1.0!{bcolors.ENDC}\n"
-    )
+    print(f"{bcolors.BOLD}{bcolors.OKBLUE}[INFO]: Welcome to TAMPY v1.0!{bcolors.ENDC}\n")
 
     load_dotenv()
 
@@ -272,12 +250,8 @@ def load_args():
         description="TAMPY 1.0 - An E-Commerce Web Security Assessment Tool"
     )
     lr_group = parser.add_mutually_exclusive_group(required=True)
-    lr_group.add_argument(
-        "-L", "--local", action="store_true", help="Use local LLM server"
-    )
-    lr_group.add_argument(
-        "-R", "--remote", action="store_true", help="Use a remote LLM API"
-    )
+    lr_group.add_argument("-L", "--local", action="store_true", help="Use local LLM server")
+    lr_group.add_argument("-R", "--remote", action="store_true", help="Use a remote LLM API")
     parser.add_argument(
         "-U",
         "--url",
@@ -322,10 +296,7 @@ def main():
     while True:
         url_input = url_menu(url_skip_prompt, another_url)
         if url_input:
-            if (
-                verify_website_exists(url_input)
-                or url_input == "https://127.0.0.1:5000/"
-            ):
+            if verify_website_exists(url_input) or url_input == "https://127.0.0.1:5000/":
                 ecommerce_found, prefix = phase_1(url_input, webtechs_dir)
                 if not ecommerce_found:
                     phase_2_success = False
@@ -340,24 +311,16 @@ def main():
                             phase_2_success = True
 
                     except KeyboardInterrupt:
-                        print(
-                            f"{bcolors.OKBLUE}[INFO]: Recording stopped by user.{bcolors.ENDC}"
-                        )
+                        print(f"{bcolors.OKBLUE}[INFO]: Recording stopped by user.{bcolors.ENDC}")
                         if not har_filename or not actions_file:
                             print(
                                 f"{bcolors.FAIL}[ERROR]: Recording was interrupted, no files saved.{bcolors.ENDC}"
                             )
                         else:
                             # Check if files were created
-                            har_file = os.path.join(
-                                packets_dir, f"{prefix}_packets.json"
-                            )
-                            har_raw = os.path.join(
-                                packets_dir, f"{prefix}_raw_packets.har"
-                            )
-                            actions_filename = os.path.join(
-                                actions_path, f"{prefix}_actions.py"
-                            )
+                            har_file = os.path.join(packets_dir, f"{prefix}_packets.json")
+                            har_raw = os.path.join(packets_dir, f"{prefix}_raw_packets.har")
+                            actions_filename = os.path.join(actions_path, f"{prefix}_actions.py")
                             if (
                                 os.path.exists(har_file)
                                 and os.path.exists(har_raw)
@@ -369,9 +332,7 @@ def main():
                                 dom = parsed.netloc.lower()
                                 if dom.startswith("www."):
                                     dom = dom[4:]
-                                redacted_file, map_file = redact_filtered(
-                                    har_file, dom
-                                )
+                                redacted_file, map_file = redact_filtered(har_file, dom)
                                 actions_file = actions_filename
                                 if redacted_file and map_file:
                                     har_filename = redacted_file
@@ -392,6 +353,7 @@ def main():
                                 json_result,
                                 actions_file,
                                 map_file,
+                                mode,
                                 debug,
                             )
                     else:
@@ -407,9 +369,7 @@ def main():
                     f"{bcolors.FAIL}[ERROR]: The website does not exist or could not be accessed. Please try another URL.{bcolors.ENDC}"
                 )
         else:
-            print(
-                f"{bcolors.FAIL}[ERROR]: Invalid URL entered. Please try again.{bcolors.ENDC}"
-            )
+            print(f"{bcolors.FAIL}[ERROR]: Invalid URL entered. Please try again.{bcolors.ENDC}")
 
         if not yes_no_menu(
             f"{bcolors.BOLD}\nDo you want to try a new website? (y/n): {bcolors.ENDC}"
@@ -417,9 +377,7 @@ def main():
             break
         another_url = True
 
-    print(
-        f"{bcolors.BOLD}{bcolors.OKCYAN}\nGoodbye! Thank you for using TAMPY :){bcolors.ENDC}"
-    )
+    print(f"{bcolors.BOLD}{bcolors.OKCYAN}\nGoodbye! Thank you for using TAMPY :){bcolors.ENDC}")
     print(f"{bcolors.OKBLUE}[INFO]: Exiting now...{bcolors.ENDC}")
 
 
