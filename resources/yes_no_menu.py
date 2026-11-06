@@ -1,10 +1,10 @@
-from resources.bcolors import bcolors
+from resources import ui
 
 
 def yes_no_menu(question):
     while True:
         choice = input(question).strip().lower()
         if choice not in ["y", "yes", "n", "no"]:
-            print(f"{bcolors.BOLD}{bcolors.FAIL}Please enter 'y' or 'n'{bcolors.ENDC}")
+            ui.warn("Please enter 'y' or 'n'.")
         else:
             return choice in ["y", "yes"]

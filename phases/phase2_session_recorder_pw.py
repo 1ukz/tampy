@@ -3,7 +3,7 @@ import signal
 import subprocess
 import time
 
-from resources.bcolors import bcolors
+from resources import ui
 
 # Global flag to control the recording loop
 stop_recording = False
@@ -34,14 +34,10 @@ def record_user_session(url, har_path, actions_path):
         har_path,
         url,
     ]
-    print(f"{bcolors.OKBLUE}[INFO]: Starting Playwright codegen...{bcolors.ENDC}")
-    print(f"{bcolors.OKBLUE}[INFO]: Command: {' '.join(cmd)}\n{bcolors.ENDC}")
-    print(
-        f"{bcolors.BOLD}{bcolors.WARNING} Please simulate an ordinary user completing the purchase flow for one product. {bcolors.ENDC}"
-    )
-    print(
-        f"{bcolors.WARNING}[WARNING]: Only interact with the website interface, DO NOT use browser functions (e.g. back button){bcolors.ENDC}"
-    )
+    ui.info("Launching Playwright codegen — a browser window will open.")
+    print(f"      {ui.paint(' '.join(cmd), ui.C_MUTE)}\n")
+    ui.status("run", "Complete ONE full purchase flow for a single product, as a normal user.")
+    ui.warn("Use only the website's own interface — avoid browser controls (e.g. the back button).")
     time.sleep(1)
 
     # Run subprocess attached to the console
@@ -55,7 +51,7 @@ def record_user_session(url, har_path, actions_path):
     # Set the custom signal handler for SIGINT (Ctrl+C)
     signal.signal(signal.SIGINT, handler)
 
-    print(f"{bcolors.BOLD}{bcolors.WARNING}Press Ctrl+C to stop recording...{bcolors.ENDC}")
+    ui.status("run", "Recording… press Ctrl+C when the purchase flow is complete.")
     # Keep the script running until Ctrl+C is pressed
     while not stop_recording:
         time.sleep(1)
@@ -68,12 +64,10 @@ def record_user_session(url, har_path, actions_path):
 
     # Check if the files were created
     if not os.path.exists(har_path) or not os.path.exists(actions_path):
-        print(
-            f"{bcolors.FAIL}[ERROR]: Files not created: {har_path} or {actions_path}{bcolors.ENDC}"
-        )
+        ui.err(f"Recording files not created: {har_path} or {actions_path}")
         return None, None
 
-    print(f"{bcolors.OKGREEN}[SUCCESS]: HAR saved to: {har_path}{bcolors.ENDC}")
-    print(f"{bcolors.OKGREEN}[SUCCESS]: Actions saved to: {actions_path}{bcolors.ENDC}")
+    ui.ok(f"HAR saved to: {har_path}")
+    ui.ok(f"Actions saved to: {actions_path}")
 
     return har_path, actions_path

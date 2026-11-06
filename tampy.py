@@ -16,7 +16,6 @@ import time  # noqa: E402
 import urllib.parse  # noqa: E402
 
 from dotenv import load_dotenv  # noqa: E402
-from halo import Halo  # noqa: E402
 
 from phases.phase1_webtech_rec import (  # noqa: E402
     ScanError,
@@ -48,43 +47,32 @@ def phase_1(url_input, webtechs_dir):
     filename = os.path.join(webtechs_dir, f"{prefix}_webtechs_found.log")
 
     if os.path.exists(filename):
-        print(
-            f"{bcolors.OKBLUE}[INFO]: A web techs enumeration log file has been found for this URL. {bcolors.ENDC}"
-        )
+        ui.info("A web-techs enumeration log already exists for this URL.")
         if yes_no_menu(
-            f"{bcolors.BOLD}Do you want to use the existing log file and skip enumeration? (y/n): {bcolors.ENDC}"
+            f"{bcolors.BOLD}Use the existing log and skip enumeration? (y/n): {bcolors.ENDC}"
         ):
-            print(
-                f"{bcolors.OKBLUE}[INFO]: Using existing web techs enumeration log: {filename}{bcolors.ENDC}"
-            )
-            time.sleep(1)
+            ui.info(f"Using existing enumeration log: {filename}")
+            time.sleep(0.5)
             ecommerce_found = parse_existing_file_for_ecommerce(filename)
             return ecommerce_found, prefix
 
-    spinner = Halo(text="Scanning web technologies... Please wait patiently.", spinner="dots")
-    spinner.start()
+    spinner = ui.Spinner("Scanning web technologies...").start()
     try:
         results = scan_url(url_input, spinner)
     except ScanError:
         # Enumeration failed (network/library issue), which is NOT the same as
         # detecting an e-commerce platform. Warn and continue the assessment.
-        print(
-            f"{bcolors.WARNING}[WARNING]: Skipping platform detection and "
-            f"continuing with the assessment.{bcolors.ENDC}"
-        )
+        ui.warn("Skipping platform detection and continuing with the assessment.")
         return False, prefix
 
     if not results:
-        print(
-            f"{bcolors.WARNING}[WARNING]: Enumeration returned no technologies; "
-            f"continuing with the assessment.{bcolors.ENDC}"
-        )
+        ui.warn("Enumeration returned no technologies; continuing with the assessment.")
         return False, prefix
 
     platforms_found, ecommerce_found = check_ecommerce_platforms(results, spinner)
     pretty = get_pretty_output(results, platforms_found, items_per_row=3)
     save_results_to_file(url_input, pretty, webtechs_dir)
-    print(f"{bcolors.OKGREEN}[SUCCESS]: Webtechs log saved to: {filename}{bcolors.ENDC}")
+    ui.ok(f"Web-techs log saved to: {filename}")
     return ecommerce_found, prefix
 
 
@@ -105,13 +93,11 @@ def phase_2(url_input, packets_dir, actions_path, debug):
     actions_filename = os.path.join(actions_path, f"{prefix}_actions.py")
     # Check if HAR and actions files already exist
     if os.path.exists(har_file) and os.path.exists(har_raw) and os.path.exists(actions_filename):
-        print(f"{bcolors.OKBLUE}[INFO]: Existing session files found for this URL.{bcolors.ENDC}")
+        ui.info("Existing session files found for this URL.")
         if yes_no_menu(
-            f"{bcolors.BOLD}Do you want to use the existing HAR and actions files and skip recording? (y/n): {bcolors.ENDC}"
+            f"{bcolors.BOLD}Use the existing recording and skip this step? (y/n): {bcolors.ENDC}"
         ):
-            print(
-                f"{bcolors.OKBLUE}[INFO]: Using existing files: {har_file}, {actions_filename}{bcolors.ENDC}"
-            )
+            ui.info(f"Using existing files: {har_file}, {actions_filename}")
             actions_file = actions_filename
             # Re-run redaction if the redacted file/map are missing (e.g. logs
             # produced by an older TAMPY version).
@@ -119,9 +105,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
                 redacted_file, map_file = redact_filtered(har_file, domain)
 
             if not redacted_file or not actions_file or not map_file:
-                print(
-                    f"{bcolors.FAIL}[ERROR]: Existing files could not be prepared correctly. Unable to proceed with the analysis.{bcolors.ENDC}"
-                )
+                ui.err("Existing files could not be prepared. Unable to proceed.")
                 return None, None, None
 
             return redacted_file, actions_file, map_file
@@ -131,7 +115,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
 
     # Check if we got valid paths
     if not har_filename_raw or not actions_file:
-        print(f"{bcolors.FAIL}[ERROR]: Session recording failed.{bcolors.ENDC}")
+        ui.err("Session recording failed.")
         return None, None, None
 
     if debug:
@@ -147,9 +131,7 @@ def phase_2(url_input, packets_dir, actions_path, debug):
         har_filename_filtered, redacted, secret_map = parse_har(har_filename_raw, har_file, domain)
 
     if not har_filename_filtered or not redacted or not secret_map:
-        print(
-            f"{bcolors.FAIL}[ERROR]: Packets could not be filtered/redacted. Unable to proceed with the analysis.{bcolors.ENDC}"
-        )
+        ui.err("Packets could not be filtered/redacted. Unable to proceed.")
         return None, None, None
 
     return redacted, actions_file, secret_map
@@ -162,24 +144,19 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
         f"{mode} · {stream_mode}",
     )
     time.sleep(0.3)
-    print(
-        f"{bcolors.OKBLUE}[INFO]: Evaluating the following controls: {bcolors.ENDC}\n\n"
-        + control_references()
-        + "\n"
-    )
-    time.sleep(1)
+    ui.info("Evaluating the following business-logic controls:")
+    print("\n" + control_references() + "\n")
+    time.sleep(0.6)
 
     analysis_filename = os.path.join(analysis_dir, f"{prefix}_analysis.json")
 
     if os.path.exists(analysis_filename):
-        print(
-            f"{bcolors.OKBLUE}[INFO]: An analysis file already exists for this URL: {analysis_filename}{bcolors.ENDC}"
-        )
+        ui.info(f"An analysis file already exists: {analysis_filename}")
         if yes_no_menu(
-            f"{bcolors.BOLD}Do you want to use the existing analysis file and skip AI analysis? (y/n): {bcolors.ENDC}"
+            f"{bcolors.BOLD}Use the existing analysis and skip the AI step? (y/n): {bcolors.ENDC}"
         ):
-            print(f"{bcolors.OKBLUE}[INFO]: Using existing analysis file.{bcolors.ENDC}")
-            time.sleep(0.5)
+            ui.info("Using existing analysis file.")
+            time.sleep(0.3)
             with open(analysis_filename, encoding="utf-8") as f:
                 cached = json.load(f)
             from core.models import parse_findings
@@ -187,30 +164,31 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
             result = parse_findings(cached)
             print_ai_answer(result)
             return result
-    spinner2 = Halo(
-        text="Analyzing packets... Please wait patiently, this may take a little while.",
-        spinner="dots",
-    )
-    spinner2.start()
+
+    spinner2 = ui.Spinner("Analyzing packets with the LLM (this may take a while)...").start()
 
     # Pass spinner to analyzer
     raw_result, result = analyze_packets_with_ai(
         har_filename, mode, streaming, show_think, spinner2
     )
     if result == []:
-        print(
-            f"{bcolors.FAIL}[ERROR]: After a thorough review, no potential vulnerabilities in the provided requests could be identified.\n This could be due to the provided requests not containing any parameters that would be relevant to the e-commerce purchase flow and therefore, possible vulnerabilities cannot be identified. \nPlease review the HAR packets to verify they are relevant and correct.\nIf you believe this is an error, please try again or review the raw AI JSON response to insert it manually into {har_filename}.\n Raw AI response:{bcolors.ENDC}\n"
+        ui.err(
+            "After a thorough review, no potential vulnerabilities were identified in "
+            "the provided requests. The captured packets may not contain parameters "
+            "relevant to the purchase flow. Review the HAR and try again if needed."
         )
         print(raw_result or f"{bcolors.FAIL}(no raw text captured){bcolors.ENDC}")
         return None
     if not result:
-        print(
-            f"{bcolors.FAIL}[ERROR]: No AI results to display (error parsing the JSON answer). \nPlease try again, or review the raw JSON response to insert it manually into {har_filename}.\n Raw response:{bcolors.ENDC}\n"
+        ui.err(
+            "No results to display (could not parse the JSON answer). Try again, or "
+            f"insert the raw response manually into {har_filename}. Raw response:"
         )
         print(raw_result or f"{bcolors.FAIL}(no raw text captured){bcolors.ENDC}")
         return None
 
-    print(f"\n{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: ANALYSIS RESULTS: {bcolors.ENDC}\n")
+    ui.ok(f"Analysis complete — {len(result)} potential finding(s).")
+    print()
     print_ai_answer(result)
 
     with open(analysis_filename, "w", encoding="utf-8") as f:
@@ -218,7 +196,7 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
             item.model_dump(mode="json") if hasattr(item, "model_dump") else item for item in result
         ]
         json.dump(serialisable, f, indent=2)
-    print(f"{bcolors.OKBLUE}[INFO]: Analysis results saved to: {analysis_filename}{bcolors.ENDC}")
+    ui.info(f"Analysis results saved to: {analysis_filename}")
 
     return result
 
@@ -365,19 +343,13 @@ def main():
                                 debug,
                             )
                     else:
-                        print(
-                            f"{bcolors.FAIL}[ERROR]: Phase 2 did not produce the required files.{bcolors.ENDC}"
-                        )
+                        ui.err("Phase 2 did not produce the required files.")
                 else:
-                    print(
-                        f"{bcolors.BOLD}{bcolors.FAIL}[ERROR]: The assessment cannot continue as an E-Commerce platform was found :({bcolors.ENDC}"
-                    )
+                    ui.err("Assessment cannot continue: an e-commerce platform was detected.")
             else:
-                print(
-                    f"{bcolors.FAIL}[ERROR]: The website does not exist or could not be accessed. Please try another URL.{bcolors.ENDC}"
-                )
+                ui.err("The website does not exist or could not be accessed. Try another URL.")
         else:
-            print(f"{bcolors.FAIL}[ERROR]: Invalid URL entered. Please try again.{bcolors.ENDC}")
+            ui.err("Invalid URL entered. Please try again.")
 
         if not yes_no_menu(
             f"{bcolors.BOLD}\nDo you want to try a new website? (y/n): {bcolors.ENDC}"

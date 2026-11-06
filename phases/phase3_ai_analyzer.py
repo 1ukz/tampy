@@ -3,34 +3,53 @@ import os
 
 from core.llm import build_client, messages_for, parse_response
 from core.models import Finding
-from resources.bcolors import bcolors
+from resources import ui
+
+_SEVERITY_COLOUR = {
+    "critical": ui.C_ERR,
+    "high": ui.C_ERR,
+    "medium": ui.C_WARN,
+    "low": ui.C_ACCENT,
+    "info": ui.C_MUTE,
+}
+
+
+def _field(label, value):
+    print(f"   {ui.paint(label.ljust(13), ui.C_MUTE)} {value}")
 
 
 def print_ai_answer(result):
-    """Pretty-print findings. Accepts Finding models or legacy dicts."""
-    for item in result:
+    """Pretty-print findings as themed cards. Accepts Finding models or dicts."""
+    for i, item in enumerate(result):
         if isinstance(item, Finding):
             item = item.model_dump(mode="json")
         loc = item.get("parameter_location")
         loc = loc.value if hasattr(loc, "value") else loc
-        print(
-            f"\n{bcolors.UNDERLINE}{bcolors.BOLD}{bcolors.OKBLUE}Control:{bcolors.ENDC} {item['control_id']}"
+        sev = str(item.get("severity", "")).lower()
+        sev_col = _SEVERITY_COLOUR.get(sev, ui.C_MUTE)
+
+        print(ui.rule())
+        header = (
+            f"  {ui.paint(f'[{i}]', ui.C_MUTE)} "
+            f"{ui.paint('Control ' + str(item['control_id']), ui.C_ACCENT, bold=True)}"
         )
-        print(f"{bcolors.WARNING} [Packet index]: {bcolors.ENDC}{item['packet_index']}")
-        if item.get("severity"):
-            print(f"{bcolors.WARNING} [Severity]: {bcolors.ENDC}{item.get('severity')}")
-        print(
-            f"\n{bcolors.WARNING} [Vuln. description]: {bcolors.ENDC}{item['vulnerability_description']}"
-        )
-        print(
-            f"{bcolors.WARNING} [Exploitation hypothesis]: {bcolors.ENDC}{item['exploitation_hypothesis']}"
-        )
-        print(f"{bcolors.WARNING} [Parameter]: {bcolors.ENDC}{item['parameter_name']}")
-        print(f"{bcolors.WARNING} [Parameter location]: {bcolors.ENDC}{loc}")
-        print(f"{bcolors.WARNING} [Test payload]: {bcolors.ENDC}{item['test_payload']}\n")
-        print(f"{bcolors.WARNING} Modified request example:{bcolors.ENDC}")
-        print(json.dumps(item["modified_request_example"], indent=2))
-        print("=" * 100 + "\n")
+        if sev:
+            header += f"   {ui.paint(sev.upper(), sev_col, bold=True)}"
+        conf = item.get("confidence")
+        if conf is not None:
+            header += f"   {ui.paint(f'conf {float(conf):.0%}', ui.C_MUTE)}"
+        print(header)
+        print()
+        _field("Weakness", item["vulnerability_description"])
+        _field("Impact", item["exploitation_hypothesis"])
+        _field("Parameter", f"{item['parameter_name']}  ({loc})")
+        _field("Payload", ui.paint(str(item["test_payload"]), ui.C_WARN, bold=True))
+        _field("Packet", f"#{item['packet_index']}")
+        print()
+        print(f"   {ui.paint('Modified request:', ui.C_MUTE)}")
+        for line in json.dumps(item["modified_request_example"], indent=2).splitlines():
+            print(f"     {ui.paint(line, ui.C_MUTE)}")
+        print()
 
 
 def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
@@ -43,10 +62,9 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         with open(har_filename, encoding="utf-8") as f:
             packets = json.load(f)
     except FileNotFoundError:
-        print(
-            f"{bcolors.FAIL}[ERROR]: : Packets file could not be found: {har_filename}{bcolors.ENDC}"
-        )
-        return
+        spinner.stop()
+        ui.err(f"Packets file could not be found: {har_filename}")
+        return None, None
 
     # 2. Configura las credenciales de la API según el modo
     if mode == "remote":
@@ -55,20 +73,18 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         model = os.getenv("REMOTE_MODEL_NAME")
 
         if not api_key or not base_url or not model:
-            print(
-                f"{bcolors.FAIL}[ERROR]: : Remote AI API configuration is not set correctly. Please check your environment variables.{bcolors.ENDC}"
-            )
-            return
+            spinner.stop()
+            ui.err("Remote LLM configuration is incomplete. Check your .env variables.")
+            return None, None
     else:
         api_key = "not-needed"  # no se usa en local
         base_url = os.getenv("LOCAL_BASE_URL")
         model = os.getenv("LOCAL_MODEL_NAME")
 
         if not base_url or not model:
-            print(
-                f"{bcolors.FAIL}[ERROR]: : Local LLM configurations is not set correctly. Please check your environment variables.{bcolors.ENDC}"
-            )
-            return
+            spinner.stop()
+            ui.err("Local LLM configuration is incomplete. Check your .env variables.")
+            return None, None
 
     # 3. Prepara el prompt del sistema (contexto de auditor)
     system_prompt = (
@@ -195,16 +211,15 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
 
     except Exception as e:
         spinner.stop()
-        print(f"\n{bcolors.FAIL}[ERROR]: Error during LLM analysis: {e}{bcolors.ENDC}")
+        print()
+        ui.err(f"Error during LLM analysis: {e}")
         return None, None
 
     last_raw_response = raw_output
 
     if not last_raw_response:
         spinner.stop()
-        print(
-            f"{bcolors.FAIL}[ERROR]: No response received or correctly saved from AI model.{bcolors.ENDC}"
-        )
+        ui.err("No response received from the AI model.")
         return None, None
 
     if not streaming and not show_think:

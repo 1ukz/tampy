@@ -58,37 +58,29 @@ def run_automated_verification(
     from core.verifier import capture_baseline, verify_finding, verify_finding_http
 
     if not json_result:
-        print(f"{bcolors.WARNING}[WARNING]: No findings to verify.{bcolors.ENDC}")
+        ui.warn("No findings to verify.")
         return []
 
-    print(
-        f"{bcolors.OKBLUE}[INFO]: Running automated verification on "
-        f"{len(json_result)} finding(s). Capturing a shared baseline, then one "
-        f"tampered replay per finding.{bcolors.ENDC}"
-    )
+    mode_label = "fast HTTP replay + payload sweeps" if http_mode else "full browser replay"
+    ui.info(f"Verifying {len(json_result)} finding(s) via {mode_label}.")
     if judge_mode:
-        print(
-            f"{bcolors.OKBLUE}[INFO]: Inconclusive findings will be escalated to "
-            f"the LLM judge ({judge_mode}).{bcolors.ENDC}"
-        )
+        ui.info(f"Inconclusive findings will be escalated to the LLM judge ({judge_mode}).")
 
     # Capture the untampered baseline once and reuse it for every finding.
     baseline = None
     try:
-        print(f"{bcolors.OKBLUE}[INFO]: Capturing baseline flow...{bcolors.ENDC}")
+        sp = ui.Spinner("Capturing baseline flow...").start()
         baseline = capture_baseline(json_result[0], actions_file, redactor=redactor, debug=debug)
+        sp.stop("Baseline captured.")
     except Exception as e:
-        print(
-            f"{bcolors.WARNING}[WARNING]: Baseline capture failed ({e}); each "
-            f"finding will capture its own baseline.{bcolors.ENDC}"
-        )
+        ui.warn(f"Baseline capture failed ({e}); each finding will capture its own.")
 
     results = []
     for i, finding in enumerate(json_result):
-        print(
-            f"{bcolors.BOLD}[{i + 1}/{len(json_result)}] Verifying control "
-            f"{finding.control_id} (packet {finding.packet_index}, "
-            f"param '{finding.parameter_name}')...{bcolors.ENDC}"
+        ui.status(
+            "run",
+            f"[{i + 1}/{len(json_result)}] Testing control {finding.control_id} "
+            f"· param '{finding.parameter_name}' (packet {finding.packet_index})",
         )
         if http_mode and baseline:
             fr = verify_finding_http(
@@ -178,10 +170,7 @@ def edit_packet(url_input, json_result, actions_file, map_file, mode, debug):
 
             redactor = Redactor.load_map(map_file)
         except Exception as e:
-            print(
-                f"{bcolors.WARNING}[WARNING]: Could not load secret map "
-                f"({e}); replays will use redacted placeholders.{bcolors.ENDC}"
-            )
+            ui.warn(f"Could not load secret map ({e}); replays will use placeholders.")
 
     # Normalise to Finding models (cached logs may arrive as dicts).
     findings = [f if isinstance(f, Finding) else Finding.model_validate(f) for f in json_result]
@@ -211,29 +200,33 @@ def edit_packet(url_input, json_result, actions_file, map_file, mode, debug):
                 http_mode=http_mode,
             )
         except KeyboardInterrupt:
-            print(f"{bcolors.WARNING}[WARNING]: Automated verification interrupted.{bcolors.ENDC}")
+            ui.warn("Automated verification interrupted.")
         except Exception as e:
-            print(f"{bcolors.FAIL}[ERROR]: Automated verification failed: {e}{bcolors.ENDC}")
+            ui.err(f"Automated verification failed: {e}")
 
-    print(f"{bcolors.OKBLUE}[INFO]: Available entries:{bcolors.ENDC}")
+    ui.section("Manual Tamper & Replay", "Pick a finding to craft and replay by hand")
 
     while True:
         for i, finding in enumerate(findings):
-            print(f"  [{i}] Control={finding.control_id}  Packet Index={finding.packet_index}")
+            print(
+                f"  {ui.paint(f'[{i}]', ui.C_ACCENT, bold=True)} "
+                f"control={finding.control_id}  "
+                f"{ui.paint('param=' + finding.parameter_name, ui.C_MUTE)}  "
+                f"packet #{finding.packet_index}"
+            )
 
         while True:
             choice = input(f"\n{bcolors.BOLD}Select entry by list index: {bcolors.ENDC}").strip()
 
             if not choice.isdigit():
-                print(f"{bcolors.WARNING}[WARNING]: Please enter a valid number.{bcolors.ENDC}")
+                ui.warn("Please enter a valid number.")
                 continue
 
             idx = int(choice)
             if 0 <= idx < len(findings):
                 break
 
-            print(f"{bcolors.FAIL}[ERROR]: Invalid selection!{bcolors.ENDC}")
-            print(f"{bcolors.WARNING} Valid list indices: 0-{len(findings) - 1}{bcolors.ENDC}")
+            ui.err(f"Invalid selection — valid indices are 0-{len(findings) - 1}.")
 
         finding = findings[idx]
         mod_req = _mod_req_dict(finding, redactor, actual_domain)
@@ -256,19 +249,16 @@ def edit_packet(url_input, json_result, actions_file, map_file, mode, debug):
             print(bcolors.ENDC)
             sys.stdout.flush()
 
-        print(
-            f"{bcolors.OKBLUE}[INFO]: Selected request:\n {bcolors.ENDC}",
-            json.dumps(mod_req, indent=2),
-        )
-        time.sleep(0.5)
+        ui.info("Selected request:")
+        for line in json.dumps(mod_req, indent=2).splitlines():
+            print(f"     {ui.paint(line, ui.C_MUTE)}")
+        time.sleep(0.4)
 
         if not yes_no_menu(
             f"{bcolors.BOLD}Send this modified request packet as it is? (y/n): {bcolors.ENDC}"
         ):
             while True:
-                print(
-                    f"{bcolors.BOLD}{bcolors.WARNING}Current param_value: {tamper_config['param_value']}{bcolors.ENDC}"
-                )
+                ui.status("run", f"Current param_value: {tamper_config['param_value']}")
                 newval = input(
                     f"{bcolors.BOLD}Enter new value for param_value (or leave blank to keep current): {bcolors.ENDC}"
                 ).strip()
@@ -279,15 +269,13 @@ def edit_packet(url_input, json_result, actions_file, map_file, mode, debug):
                 ):
                     break
 
-        print(f"{bcolors.OKBLUE}[INFO]: Replaying flow with packet tampering...{bcolors.ENDC}")
+        ui.info("Replaying flow with packet tampering...")
         try:
             replay_actions_with_tamper(actions_file, [tamper_config], debug)
         except KeyboardInterrupt:
-            print(
-                f"{bcolors.BOLD}{bcolors.WARNING}[WARNING]: Replay interrupted by user.{bcolors.ENDC}"
-            )
+            ui.warn("Replay interrupted by user.")
         except Exception as e:
-            print(f"{bcolors.BOLD}{bcolors.FAIL}[ERROR]: Replay failed: {str(e)}{bcolors.ENDC}")
+            ui.err(f"Replay failed: {e}")
 
         if not yes_no_menu(f"{bcolors.BOLD}Test another control? (y/n): {bcolors.ENDC}"):
             break
