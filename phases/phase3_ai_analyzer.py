@@ -14,6 +14,27 @@ _SEVERITY_COLOUR = {
 }
 
 
+def _hint_for_llm_error(exc, mode):
+    """Print actionable guidance for the most common LLM API failures."""
+    msg = str(exc).lower()
+    key_var = "REMOTE_API_KEY" if mode == "remote" else "LOCAL_BASE_URL"
+    model_var = "REMOTE_MODEL_NAME" if mode == "remote" else "LOCAL_MODEL_NAME"
+    if "401" in msg or "authentication" in msg or "invalid" in msg and "key" in msg:
+        ui.warn(
+            f"This looks like an authentication failure. Check {key_var} in your .env — "
+            f"the key may be wrong, revoked, or the account may be out of balance."
+        )
+    elif "404" in msg or "model" in msg and ("not" in msg or "exist" in msg):
+        ui.warn(
+            f"This looks like an unknown model. Check {model_var} in your .env against "
+            f"your provider's current model list (e.g. DeepSeek retired "
+            f"'deepseek-chat'/'deepseek-reasoner' in 2026 — see api-docs.deepseek.com)."
+        )
+    elif "connection" in msg or "timeout" in msg or "connect" in msg:
+        base_var = "REMOTE_BASE_URL" if mode == "remote" else "LOCAL_BASE_URL"
+        ui.warn(f"Could not reach the LLM endpoint. Check {base_var} and your network/server.")
+
+
 def _field(label, value):
     print(f"   {ui.paint(label.ljust(13), ui.C_MUTE)} {value}")
 
@@ -213,6 +234,7 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         spinner.stop()
         print()
         ui.err(f"Error during LLM analysis: {e}")
+        _hint_for_llm_error(e, mode)
         return None, None
 
     last_raw_response = raw_output

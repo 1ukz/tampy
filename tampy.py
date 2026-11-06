@@ -172,19 +172,23 @@ def phase_3(har_filename, mode, streaming, show_think, analysis_dir, prefix):
         har_filename, mode, streaming, show_think, spinner2
     )
     if result == []:
-        ui.err(
-            "After a thorough review, no potential vulnerabilities were identified in "
-            "the provided requests. The captured packets may not contain parameters "
-            "relevant to the purchase flow. Review the HAR and try again if needed."
+        ui.warn(
+            "No potential vulnerabilities were identified in the provided requests. "
+            "The captured packets may not contain parameters relevant to the purchase "
+            "flow — review the HAR and try again if needed."
         )
-        print(raw_result or f"{bcolors.FAIL}(no raw text captured){bcolors.ENDC}")
         return None
-    if not result:
-        ui.err(
-            "No results to display (could not parse the JSON answer). Try again, or "
-            f"insert the raw response manually into {har_filename}. Raw response:"
-        )
-        print(raw_result or f"{bcolors.FAIL}(no raw text captured){bcolors.ENDC}")
+    if result is None:
+        if raw_result:
+            # The model answered but the JSON could not be parsed: show the raw text.
+            ui.err(
+                "Could not parse the model's JSON response. You can retry, or insert a "
+                f"corrected analysis manually into {analysis_filename}. Raw response:"
+            )
+            print(raw_result)
+        else:
+            # The API/transport failed; the specific error was already reported above.
+            ui.err("Analysis could not be completed — see the error above.")
         return None
 
     ui.ok(f"Analysis complete — {len(result)} potential finding(s).")
