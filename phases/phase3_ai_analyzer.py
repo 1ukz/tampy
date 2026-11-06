@@ -197,7 +197,6 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
                 print(raw_reasoning_content)
 
         else:
-            first_token = True
             stream_resp = client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -205,30 +204,30 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
                 stream=True,
             )
 
+            reasoning_streamed = False
             for chunk in stream_resp:
                 delta = chunk.choices[0].delta
 
-                # 1) Chain-of-thought chunk?
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    raw_reasoning_content += delta.reasoning_content
+                # 1) Chain-of-thought chunk: stream it live only with --think.
+                rc = getattr(delta, "reasoning_content", None)
+                if rc:
+                    raw_reasoning_content += rc
                     if show_think:
-                        if first_token:
+                        if not reasoning_streamed:
                             spinner.stop()
-                            first_token = False
-                        # print reasoning as it comes
-                        print(
-                            delta.reasoning_content, end="", flush=True
-                        )  # end="" para no hacer salto de linea y fluush para forzar salida inmediata sin almacenar en buffer
+                            ui.info("Model reasoning:")
+                            reasoning_streamed = True
+                        print(ui.paint(rc, ui.C_MUTE), end="", flush=True)
 
-                # 2) Final answer chunk?
-                if hasattr(delta, "content") and delta.content:
-                    raw_output += delta.content
-                    if first_token:
-                        spinner.stop()
-                        first_token = False
-                    print(delta.content, end="", flush=True)
+                # 2) Final-answer chunk: accumulate SILENTLY (it is raw JSON and
+                #    would look awful dumped to the terminal); the findings are
+                #    rendered as clean cards after parsing.
+                c = getattr(delta, "content", None)
+                if c:
+                    raw_output += c
 
-            print()  # newline after stream
+            if reasoning_streamed:
+                print()  # newline after the streamed reasoning
 
     except Exception as e:
         spinner.stop()
@@ -237,15 +236,12 @@ def analyze_packets_with_ai(har_filename, mode, streaming, show_think, spinner):
         _hint_for_llm_error(e, mode)
         return None, None
 
+    spinner.stop()  # idempotent; ensures the spinner is cleared before output
     last_raw_response = raw_output
 
     if not last_raw_response:
-        spinner.stop()
         ui.err("No response received from the AI model.")
         return None, None
-
-    if not streaming and not show_think:
-        spinner.stop()
 
     # Structurally extract + schema-validate instead of a raw json.loads.
     payload, findings = parse_response(last_raw_response)

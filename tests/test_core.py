@@ -514,6 +514,30 @@ class TestJudge(unittest.TestCase):
         self.assertIsNone(extract_json_object("no object"))
 
 
+class TestModuleIntegrity(unittest.TestCase):
+    """Import every core module. On a fresh clone (CI) this fails if a module
+    was accidentally left untracked — e.g. excluded by an over-broad
+    .gitignore pattern."""
+
+    def test_all_core_modules_import(self):
+        import importlib
+
+        for mod in (
+            "core.models",
+            "core.redaction",
+            "core.oracle",
+            "core.llm",
+            "core.verifier",
+            "core.gateways",
+            "core.judge",
+            "core.payloads",
+            "core.signatures",
+            "core.tamper",
+            "core.http_replay",
+        ):
+            importlib.import_module(mod)
+
+
 class TestUI(unittest.TestCase):
     def setUp(self):
         import resources.ui as ui

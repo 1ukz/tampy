@@ -16,8 +16,10 @@ env/
 # local secret-redaction maps (these contain real credentials — never commit).
 .logs/
 
-# Generated replay modules (built from recordings at replay time)
-*_replay.py
+# Generated replay modules (built from recordings at replay time). These are
+# written next to the recorded actions under .logs/ (already ignored above);
+# keep this pattern specific so it never matches source like core/http_replay.py.
+*_actions_replay.py
 
 # OS cruft
 .DS_Store

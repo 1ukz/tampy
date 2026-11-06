@@ -295,7 +295,9 @@ class Spinner:
         return self
 
     def stop(self, done_msg: Optional[str] = None, kind: str = "ok") -> None:
-        if self._thread is not None:
+        # Idempotent: safe to call more than once (the stream path may stop the
+        # spinner early to show reasoning, then the caller stops it again).
+        if self._thread is not None and not self._stop.is_set():
             self._stop.set()
             self._thread.join()
             sys.stdout.write("\r" + " " * (len(self.text) + 6) + "\r")
