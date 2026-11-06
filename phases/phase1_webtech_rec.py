@@ -6,6 +6,7 @@ import requests
 from requests.exceptions import HTTPError, SSLError
 from wappalyzer import analyze
 
+from resources import ui
 from resources.bcolors import bcolors
 
 try:
@@ -18,7 +19,7 @@ except Exception:
 
 
 def url_menu(url_skip_prompt, another_url):
-    print(f"{bcolors.BOLD}{bcolors.HEADER}[PHASE 1]: WEB TECHNOLOGIES ENUMERATION{bcolors.ENDC}")
+    ui.section("Phase 1 · Web Technologies Enumeration", "Fingerprint the target stack")
     url_input = ""
 
     if (
@@ -27,7 +28,7 @@ def url_menu(url_skip_prompt, another_url):
         or url_skip_prompt == "https://127.0.0.1:5000/"
     ):
         url_input = url_skip_prompt.strip()
-        print(f"{bcolors.BOLD}{bcolors.OKGREEN} Using the provided URL: {url_input} {bcolors.ENDC}")
+        ui.ok(f"Using the provided URL: {url_input}")
         another_url = True
     else:
         url_input = input(f"{bcolors.BOLD}Enter the URL to analyze: {bcolors.ENDC}").strip()
@@ -39,11 +40,9 @@ def url_menu(url_skip_prompt, another_url):
         elif pattern.match(url_input):
             modified_url = "https://www." + url_input
         else:
-            print(
-                f"{bcolors.BOLD}{bcolors.FAIL}URL does not have an expected format. Please check it and try again.{bcolors.ENDC}"
-            )
+            ui.err("URL does not have an expected format. Please check it and try again.")
             return None
-        print(f"{bcolors.OKBLUE}[INFO]: URL modified to: {modified_url}{bcolors.ENDC}")
+        ui.info(f"URL normalised to: {modified_url}")
         url_input = modified_url
     return url_input
 
@@ -57,13 +56,9 @@ def parse_existing_file_for_ecommerce(filename):
             if "e-commerce:" in line.lower():
                 ecom_detected = True
     if ecom_detected:
-        print(
-            f"{bcolors.FAIL}{bcolors.BOLD}\nThe following E-Commerce technologies were detected (from existing log):{bcolors.ENDC}"
-        )
+        ui.hit("E-commerce technologies were detected (from existing log):")
     else:
-        print(
-            f"{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: No E-Commerce technologies were detected (from existing log)!! :){bcolors.ENDC}"
-        )
+        ui.ok("No e-commerce platform detected (from existing log).")
     return ecom_detected
 
 
@@ -80,18 +75,13 @@ def verify_website_exists(url):
         return True
     except SSLError:
         # Reached the server; only the TLS chain was unhappy. Treat as reachable.
-        print(
-            f"{bcolors.WARNING}[WARNING]: TLS certificate could not be verified for "
-            f"{url}; continuing (expected for test targets).{bcolors.ENDC}"
-        )
+        ui.warn(f"TLS certificate could not be verified for {url}; continuing.")
         return True
     except HTTPError as e:
-        print(
-            f"{bcolors.BOLD}{bcolors.FAIL}Connection 4XX or 5XX [ERROR]: : {e} (status {getattr(e.response, 'status_code', 'N/A')}){bcolors.ENDC}"
-        )
+        ui.err(f"Connection error {getattr(e.response, 'status_code', 'N/A')}: {e}")
         return False
     except Exception as e:
-        print(f"{bcolors.BOLD}{bcolors.FAIL}Connection [ERROR]: : {e}{bcolors.ENDC}")
+        ui.err(f"Connection error: {e}")
         return False
 
 
@@ -105,7 +95,7 @@ def scan_url(url_input, spinner):
         return results
     except Exception as e:
         spinner.stop()
-        print(f"{bcolors.FAIL}[ERROR]: Technology enumeration failed: {e}{bcolors.ENDC}")
+        ui.err(f"Technology enumeration failed: {e}")
         # Signal failure distinctly so the caller does NOT treat it as
         # "an e-commerce platform was found" and silently abort the run.
         raise ScanError(str(e)) from e
@@ -137,17 +127,15 @@ def check_ecommerce_platforms(results, spinner):
                     found[tech] = details.get("categories", [])
     if found:
         spinner.stop()
-        print(
-            f"{bcolors.FAIL}{bcolors.BOLD}\nThe following E-Commerce technologies were detected:{bcolors.ENDC}"
-        )
+        ui.hit("E-commerce platform technologies were detected:")
         for tech, cats in found.items():
-            print(f"{bcolors.FAIL}{tech} - {', '.join(cats)}{bcolors.ENDC}")
+            print(
+                f"      {ui.paint('•', ui.C_ERR)} {tech} {ui.paint('— ' + ', '.join(cats), ui.C_MUTE)}"
+            )
         return found, True
     else:
         spinner.stop()
-        print(
-            f"{bcolors.BOLD}{bcolors.OKGREEN}[SUCCESS]: No E-Commerce technologies were detected!! :){bcolors.ENDC}"
-        )
+        ui.ok("No e-commerce platform detected — target uses custom logic.")
         return found, False
 
 
@@ -185,5 +173,5 @@ def save_results_to_file(url, content, logs_dir):
         with open(filename, "w", encoding="utf-8") as f:
             f.write(content)
     except Exception as e:
-        print(f"{bcolors.FAIL} [ERROR]: Error saving log:{bcolors.ENDC} {e}")
+        ui.err(f"Error saving log: {e}")
     return filename

@@ -514,5 +514,54 @@ class TestJudge(unittest.TestCase):
         self.assertIsNone(extract_json_object("no object"))
 
 
+class TestUI(unittest.TestCase):
+    def setUp(self):
+        import resources.ui as ui
+
+        self.ui = ui
+
+    def test_plain_when_not_tty(self):
+        # In the test runner stdout is not a TTY -> no escape codes.
+        self.assertFalse(self.ui.color_enabled())
+        self.assertEqual(self.ui.paint("hi", self.ui.C_OK), "hi")
+        self.assertEqual(self.ui.gradient("TAMPY"), "TAMPY")
+        self.assertNotIn("\033", self.ui.rule())
+
+    def test_color_when_forced(self):
+        import os
+        import sys
+
+        real = sys.stdout.isatty
+        sys.stdout.isatty = lambda: True
+        os.environ.pop("NO_COLOR", None)
+        try:
+            self.assertTrue(self.ui.color_enabled())
+            self.assertIn("\033[38;2;", self.ui.gradient("TAMPY"))
+            self.assertIn("\033[38;2;", self.ui.paint("x", self.ui.C_ERR))
+        finally:
+            sys.stdout.isatty = real
+
+    def test_no_color_env_disables(self):
+        import os
+        import sys
+
+        real = sys.stdout.isatty
+        sys.stdout.isatty = lambda: True
+        os.environ["NO_COLOR"] = "1"
+        try:
+            self.assertFalse(self.ui.color_enabled())
+        finally:
+            os.environ.pop("NO_COLOR", None)
+            sys.stdout.isatty = real
+
+    def test_status_helpers_run(self):
+        # Should never raise, regardless of colour support.
+        for fn in (self.ui.ok, self.ui.info, self.ui.warn, self.ui.err, self.ui.hit):
+            fn("message")
+        self.ui.section("Phase X", "subtitle")
+        with self.ui.Spinner("working"):
+            pass
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

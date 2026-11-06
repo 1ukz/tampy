@@ -1,7 +1,7 @@
 import json
 
 from core.redaction import Redactor
-from resources.bcolors import bcolors
+from resources import ui
 
 
 def redact_filtered(filtered_path, domain):
@@ -33,16 +33,13 @@ def redact_filtered(filtered_path, domain):
         total = sum(report.values())
         if total:
             summary = ", ".join(f"{k.lower()}={v}" for k, v in report.items())
-            print(
-                f"{bcolors.OKBLUE}[INFO]: Redacted {total} secret value(s) before "
-                f"LLM egress ({summary}).{bcolors.ENDC}"
-            )
+            ui.ok(f"Redacted {total} secret value(s) before LLM egress ({summary}).")
         else:
-            print(f"{bcolors.OKBLUE}[INFO]: No secrets detected to redact.{bcolors.ENDC}")
-        print(f"{bcolors.OKBLUE}[INFO]: Redacted packets written to {redacted_path}.{bcolors.ENDC}")
+            ui.info("No secrets detected to redact.")
+        ui.info(f"Redacted packets written to {redacted_path}")
         return redacted_path, map_path
     except Exception as e:
-        print(f"{bcolors.FAIL}[ERROR]: Failed to redact packets: {e}{bcolors.ENDC}")
+        ui.err(f"Failed to redact packets: {e}")
         return None, None
 
 
@@ -128,13 +125,11 @@ def parse_har(har_path, filtered_path, domain):
         with open(filtered_path, "w", encoding="utf-8") as f:
             json.dump(filtered, f, indent=2)
 
-        print(
-            f"{bcolors.OKGREEN}[SUCCESS]: Filtered packets saved to: {filtered_path}{bcolors.ENDC}"
-        )
+        ui.ok(f"Filtered {len(filtered)} relevant packet(s) → {filtered_path}")
         redacted_path, map_path = redact_filtered(filtered_path, domain)
 
         return filtered_path, redacted_path, map_path
 
     except Exception as e:
-        print(f"{bcolors.FAIL}[ERROR]: Failed to parse HAR: {e}{bcolors.ENDC}")
+        ui.err(f"Failed to parse HAR: {e}")
         return None, None, None
